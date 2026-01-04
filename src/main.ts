@@ -178,21 +178,20 @@ listen("menu-event", async (event) => {
 });
 
 // --- Close Listener ---
-appWindow.listen("tauri://close-requested", async (event: any) => {
+appWindow.onCloseRequested(async (event) => {
   if (isDirty) {
-    // Prevent default close immediately
+    // Prevent the close
     event.preventDefault();
 
     // Ask user
     const confirmed = await confirm("You have unsaved changes. Are you sure you want to exit?", { kind: 'warning', title: 'Unsaved Changes' });
 
     if (confirmed) {
-      // Create a new scope or just reset dirty flag so next close succeeds
-      isDirty = false;
-      await appWindow.close();
+      // Force close by destroying the window
+      await appWindow.destroy();
     }
   }
-  // If not dirty, we do nothing and let the default close behavior happen
+  // If not dirty, don't prevent - window closes normally
 });
 
 
@@ -277,6 +276,7 @@ const toolbarScrollable = document.getElementById("toolbar-scrollable")!;
 
 function createIconBtn(key: string): HTMLElement {
   const btn = document.createElement("div");
+  btn.className = "icon-btn";
   btn.textContent = iconMap[key];
   btn.title = key;
   btn.style.cursor = "pointer";

@@ -31,23 +31,41 @@
       z-index: 10;
     }
 
-    /* Custom Scrollbar for Toolbar */
+    /* Custom Scrollbar for Toolbar - Overlay style */
+    #toolbar-scrollable {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+
+    #sidebar:hover #toolbar-scrollable {
+      scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+    }
+
     #toolbar-scrollable::-webkit-scrollbar {
-      width: 6px;
+      width: 4px;
       background: transparent;
     }
 
     #toolbar-scrollable::-webkit-scrollbar-thumb {
       background: transparent;
-      border-radius: 3px;
+      border-radius: 2px;
     }
 
-    #toolbar-scrollable:hover::-webkit-scrollbar-thumb {
+    #sidebar:hover #toolbar-scrollable::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.3);
     }
 
-    #toolbar-scrollable:hover::-webkit-scrollbar-thumb:hover {
+    #sidebar:hover #toolbar-scrollable::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Icon items styling */
+    .icon-btn {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-sizing: border-box;
     }
   </style>
 </head>
