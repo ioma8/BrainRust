@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BrainRust</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #242424;
+      font-family: Inter, sans-serif;
+    }
+
+    #mindmap-canvas {
+      display: block;
+    }
+
+    #node-editor {
+      position: absolute;
+      display: none;
+      background: #3a3a3a;
+      color: white;
+      border: 2px solid #646cff;
+      border-radius: 5px;
+      padding: 5px;
+      font-family: Inter, sans-serif;
+      font-size: 14px;
+      z-index: 10;
+    }
+
+    /* Custom Scrollbar for Toolbar */
+    #toolbar-scrollable::-webkit-scrollbar {
+      width: 6px;
+      background: transparent;
+    }
+
+    #toolbar-scrollable::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 3px;
+    }
+
+    #toolbar-scrollable:hover::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    #toolbar-scrollable:hover::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="sidebar"
+    style="position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background: #333; display: flex; flex-direction: column; border-right: 1px solid #555; z-index: 20;">
+    <div id="toolbar-fixed"
+      style="width: 100%; display: flex; flex-direction: column; align-items: center; padding: 10px 0; flex-shrink: 0; background: #333; border-bottom: 1px solid #444;">
+    </div>
+    <div id="toolbar-scrollable"
+      style="width: 100%; display: flex; flex-direction: column; align-items: center; overflow-y: auto; overflow-x: hidden; flex-grow: 1; padding: 5px 0;">
+    </div>
+  </div>
+  <canvas id="mindmap-canvas" style="position: absolute; left: 40px; right: 0; top: 0; bottom: 0;"></canvas>
+  <input type="text" id="node-editor">
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
