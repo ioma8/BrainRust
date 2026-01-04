@@ -7,6 +7,14 @@ import { MindMap, Node } from "./types";
 const canvas = document.getElementById("mindmap-canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const editor = document.getElementById("node-editor") as HTMLInputElement;
+const sidebarEl = document.getElementById("sidebar") as HTMLElement;
+
+const NODE_HEIGHT = 30;
+let sidebarWidth = sidebarEl?.offsetWidth || 40;
+
+const H_GAP = 50;
+const V_GAP = 20;
+const MIN_NODE_WIDTH = 100;
 
 let mindMap: MindMap | null = null;
 let offset = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -54,11 +62,66 @@ async function markDirty() {
 async function loadMapState(fit = false) {
   try {
     mindMap = await invoke<MindMap>("get_map");
+    computeLayout();
     render();
     if (fit) fitView();
   } catch (e) {
     console.error("Failed to load map:", e);
   }
+}
+
+function computeLayout() {
+  if (!mindMap) return;
+  const rootId = mindMap.root_id;
+  const prevRoot = mindMap.nodes[rootId];
+  const prevX = prevRoot?.x ?? 0;
+  const prevY = prevRoot?.y ?? 0;
+
+  layoutNode(rootId, 0, 0);
+
+  // Keep the root anchored so adding/removing nodes doesn't cause the whole tree
+  // to "jump" vertically or horizontally.
+  const nextRoot = mindMap.nodes[rootId];
+  if (!nextRoot) return;
+  const dx = prevX - nextRoot.x;
+  const dy = prevY - nextRoot.y;
+  if (dx !== 0 || dy !== 0) {
+    for (const node of Object.values(mindMap.nodes)) {
+      node.x += dx;
+      node.y += dy;
+    }
+  }
+}
+
+function layoutNode(nodeId: string, x: number, startY: number): number {
+  if (!mindMap) return NODE_HEIGHT + V_GAP;
+  const node = mindMap.nodes[nodeId];
+  if (!node) return NODE_HEIGHT + V_GAP;
+
+  const rowH = NODE_HEIGHT + V_GAP;
+  const children = node.children || [];
+  const nodeW = Math.max(getNodeWidth(node), MIN_NODE_WIDTH);
+
+  if (children.length === 0) {
+    node.x = x;
+    node.y = startY;
+    return rowH;
+  }
+
+  const childX = x + nodeW + H_GAP;
+
+  let currentY = startY;
+  for (const childId of children) {
+    if (!mindMap.nodes[childId]) continue;
+    const h = layoutNode(childId, childX, currentY);
+    currentY += h;
+  }
+
+  const totalH = Math.max(currentY - startY, rowH);
+  node.x = x;
+  // Center parent within children cluster; keep parent aligned with child when only one.
+  node.y = startY + (totalH - rowH) / 2;
+  return totalH;
 }
 
 // --- File Operations ---
@@ -74,6 +137,7 @@ async function createNewMap() {
     currentFilePath = null;
     isDirty = false;
     await updateTitle();
+    computeLayout();
     render();
     fitView();
   } catch (e) {
@@ -331,13 +395,13 @@ Object.keys(iconMap).forEach(key => {
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  // Canvas width is window - sidebar (40px)
-  const sidebarWidth = 40;
+  sidebarWidth = sidebarEl?.offsetWidth || sidebarWidth;
   canvas.width = (window.innerWidth - sidebarWidth) * dpr;
   canvas.height = window.innerHeight * dpr;
   canvas.style.width = (window.innerWidth - sidebarWidth) + "px";
   canvas.style.height = window.innerHeight + "px";
-  ctx.scale(dpr, dpr);
+  // Reset transform so repeated resizes don't accumulate scaling.
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   render();
 }
 window.addEventListener("resize", resize);
@@ -345,7 +409,6 @@ window.addEventListener("resize", resize);
 function render() {
   if (!mindMap) return;
 
-  const sidebarWidth = 40;
   const width = window.innerWidth - sidebarWidth;
   const height = window.innerHeight;
 
@@ -362,8 +425,8 @@ function render() {
       const parent = mindMap!.nodes[node.parent];
 
       const pW = getNodeWidth(parent);
-      const pH = 30;
-      const cH = 30;
+      const pH = NODE_HEIGHT;
+      const cH = NODE_HEIGHT;
 
       const pCx = parent.x + offset.x + pW;
       const pCy = parent.y + offset.y + pH / 2;
@@ -394,7 +457,7 @@ function getNodeWidth(node: Node): number {
 
 function drawNode(node: Node, isSelected: boolean) {
   const w = getNodeWidth(node);
-  const h = 30;
+  const h = NODE_HEIGHT;
   const x = node.x + offset.x;
   const y = node.y + offset.y;
 
@@ -455,7 +518,7 @@ function fitView() {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   nodes.forEach(n => {
     const w = getNodeWidth(n);
-    const h = 30;
+    const h = NODE_HEIGHT;
     if (n.x < minX) minX = n.x;
     if (n.y < minY) minY = n.y;
     if (n.x + w > maxX) maxX = n.x + w;
@@ -465,7 +528,6 @@ function fitView() {
   const bboxW = maxX - minX;
   const bboxH = maxY - minY;
 
-  const sidebarWidth = 40;
   const cx = minX + bboxW / 2;
   const cy = minY + bboxH / 2;
   const screenCx = (window.innerWidth - sidebarWidth) / 2;
@@ -480,23 +542,20 @@ function fitView() {
 // --- Interaction Helpers ---
 
 function screenToWorld(x: number, y: number) {
-  // Adjust for sidebar
-  return { x: x - offset.x, y: y - offset.y }; // Mouse events relative to canvas, which is offset by CSS?
-  // Wait, e.clientX is global. 
-  // Canvas is absolute at left: 40px.
-  // So we must subtract 40 from e.clientX to get canvas-relative X.
+  // Input should be canvas-relative coordinates.
+  return { x: x - offset.x, y: y - offset.y };
 }
 
 function getNodeAt(x: number, y: number): Node | null {
   if (!mindMap) return null;
-  // fix coords
-  const canvasX = x - 40;
+  // Convert from window coords to canvas coords.
+  const canvasX = x - sidebarWidth;
   const canvasY = y;
 
   const p = screenToWorld(canvasX, canvasY);
   for (const node of Object.values(mindMap.nodes)) {
     const w = getNodeWidth(node);
-    const h = 30;
+    const h = NODE_HEIGHT;
     if (p.x >= node.x && p.x <= node.x + w &&
       p.y >= node.y && p.y <= node.y + h) {
       return node;
@@ -511,13 +570,13 @@ function ensureVisible(nodeId: string) {
   if (!node) return;
 
   const w = getNodeWidth(node);
-  const h = 30;
+  const h = NODE_HEIGHT;
 
   const screenX = node.x + offset.x; // Canvas space
   const screenY = node.y + offset.y;
 
   const padding = 50;
-  const viewportW = window.innerWidth - 40;
+  const viewportW = window.innerWidth - sidebarWidth;
   const viewportH = window.innerHeight;
 
   let dx = 0;
@@ -567,19 +626,28 @@ canvas.addEventListener("mouseup", () => {
   isDragging = false;
 });
 
+// If mouse is released outside the canvas, ensure panning stops.
+window.addEventListener("mouseup", () => {
+  isDragging = false;
+});
+
+canvas.addEventListener("mouseleave", () => {
+  isDragging = false;
+});
+
 canvas.addEventListener("dblclick", async (e) => {
   const node = getNodeAt(e.clientX, e.clientY);
   if (node) {
     // startEdit needs visual position adjustment?
     const w = getNodeWidth(node);
-    const h = 30;
+    const h = NODE_HEIGHT;
     const canvasX = node.x + offset.x;
     const canvasY = node.y + offset.y;
 
     // Editor is fixed pos? No, absolute.
-    // It's in body. So it needs left: canvasX + 40
+    // It's in body. So it needs left: canvasX + sidebarWidth
 
-    startEdit(canvasX + 40, canvasY, w, h, node.content);
+    startEdit(canvasX + sidebarWidth, canvasY, w, h, node.content);
   }
 });
 
@@ -669,8 +737,8 @@ function startEdit(x?: number, y?: number, w?: number, h?: number, content?: str
   if (x === undefined) {
     // Calculated if triggered via key
     const nodeW = getNodeWidth(node);
-    const nodeH = 30;
-    x = node.x + offset.x + 40;
+    const nodeH = NODE_HEIGHT;
+    x = node.x + offset.x + sidebarWidth;
     y = node.y + offset.y;
     w = nodeW;
     h = nodeH;
@@ -719,7 +787,11 @@ updateTitle();
 loadMapState(true);
 
 // Get initial file path from backend (in case of restart with state?? probably empty)
-invoke<string | null>("get_file_path").then(p => {
-  currentFilePath = p;
-  updateTitle();
-});
+invoke<string | null>("get_file_path")
+  .then(p => {
+    currentFilePath = p;
+    updateTitle();
+  })
+  .catch(() => {
+    // Non-fatal: title will remain based on current client state.
+  });

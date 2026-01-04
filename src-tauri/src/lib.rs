@@ -6,7 +6,7 @@ use brain_core::storage::{from_xml, to_xml};
 use brain_core::xmind::{from_xmind, to_xmind};
 use brain_core::{MindMap, Navigation};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use tauri::{Emitter, State};
 
 struct AppState {
@@ -14,78 +14,79 @@ struct AppState {
     file_path: Mutex<Option<String>>,
 }
 
-#[tauri::command]
-fn get_map(state: State<AppState>) -> MindMap {
-    state.map.lock().unwrap().clone()
+fn lock_mutex<'a, T>(mutex: &'a Mutex<T>, err: &'static str) -> Result<MutexGuard<'a, T>, String> {
+    mutex.lock().map_err(|_| err.to_string())
 }
 
 #[tauri::command]
-fn new_map(state: State<AppState>) -> MindMap {
-    let mut map = state.map.lock().unwrap();
-    *map = MindMap::new();
-    map.compute_layout();
+fn get_map(state: State<AppState>) -> Result<MindMap, String> {
+    Ok(lock_mutex(&state.map, "Mind map state lock was poisoned")?.clone())
+}
 
-    let mut path = state.file_path.lock().unwrap();
+#[tauri::command]
+fn new_map(state: State<AppState>) -> Result<MindMap, String> {
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
+    *map = MindMap::new();
+
+    let mut path = lock_mutex(&state.file_path, "File path state lock was poisoned")?;
     *path = None;
 
-    map.clone()
+    Ok(map.clone())
 }
 
 #[tauri::command]
-fn get_file_path(state: State<AppState>) -> Option<String> {
-    state.file_path.lock().unwrap().clone()
+fn get_file_path(state: State<AppState>) -> Result<Option<String>, String> {
+    Ok(lock_mutex(&state.file_path, "File path state lock was poisoned")?.clone())
 }
 
 // ... other commands (add_child, etc. - no need to modify unless needed)
 
 #[tauri::command]
 fn add_child(state: State<AppState>, parent_id: String, content: String) -> Result<String, String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     let res = map.add_child(&parent_id, content)?;
-    map.compute_layout();
     Ok(res)
 }
 
 #[tauri::command]
 fn add_sibling(state: State<AppState>, node_id: String, content: String) -> Result<String, String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     let res = map.add_sibling(&node_id, content)?;
-    map.compute_layout();
     Ok(res)
 }
 
 #[tauri::command]
 fn change_node(state: State<AppState>, node_id: String, content: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
-    map.change_node(&node_id, content)
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
+    map.change_node(&node_id, content)?;
+    Ok(())
 }
 
 #[tauri::command]
 fn remove_node(state: State<AppState>, node_id: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
-    let res = map.remove_node(&node_id)?;
-    map.compute_layout();
-    Ok(res)
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
+    map.remove_node(&node_id)?;
+    Ok(())
 }
 
 #[tauri::command]
 fn navigate(state: State<AppState>, direction: Navigation) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     map.navigate(direction);
     Ok(())
 }
 
 #[tauri::command]
 fn select_node(state: State<AppState>, node_id: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     map.select_node(&node_id)
 }
 
 #[tauri::command]
 fn save_map(state: State<AppState>, path: Option<String>) -> Result<String, String> {
-    let map = state.map.lock().unwrap();
+    let map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
 
-    let mut current_path = state.file_path.lock().unwrap();
+    let mut current_path = lock_mutex(&state.file_path, "File path state lock was poisoned")?;
 
     let target_path = if let Some(p) = path {
         *current_path = Some(p.clone());
@@ -188,11 +189,10 @@ fn load_map(state: State<AppState>, path: String) -> Result<(), String> {
         }
     };
 
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     *map = new_map;
-    map.compute_layout();
 
-    let mut current_path = state.file_path.lock().unwrap();
+    let mut current_path = lock_mutex(&state.file_path, "File path state lock was poisoned")?;
     *current_path = Some(path);
 
     Ok(())
@@ -200,25 +200,21 @@ fn load_map(state: State<AppState>, path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn add_icon(state: State<AppState>, node_id: String, icon: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     map.add_icon(&node_id, icon)?;
-    // Layout might change if icons affect width
-    map.compute_layout();
     Ok(())
 }
 
 #[tauri::command]
 fn remove_last_icon(state: State<AppState>, node_id: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
+    let mut map = lock_mutex(&state.map, "Mind map state lock was poisoned")?;
     map.remove_last_icon(&node_id)?;
-    map.compute_layout();
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut map = MindMap::new();
-    map.compute_layout();
+    let map = MindMap::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
