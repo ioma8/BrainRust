@@ -92,19 +92,18 @@ async function openMap() {
       multiple: false,
       directory: false,
       filters: [
-        { name: 'MindMap Files', extensions: ['mm', 'xmind'] },
+        { name: 'MindMap Files', extensions: ['mm', 'xmind', 'opml', 'mmap', 'mindnode', 'smmx'] },
         { name: 'FreeMind', extensions: ['mm'] },
-        { name: 'XMind', extensions: ['xmind'] }
+        { name: 'XMind', extensions: ['xmind'] },
+        { name: 'OPML', extensions: ['opml'] },
+        { name: 'MindManager', extensions: ['mmap'] },
+        { name: 'MindNode', extensions: ['mindnode'] },
+        { name: 'SimpleMind', extensions: ['smmx'] }
       ]
     });
 
     if (path) {
-      const isXmind = path.toLowerCase().endsWith('.xmind');
-      if (isXmind) {
-        await invoke("load_xmind", { path });
-      } else {
-        await invoke("load_map", { path });
-      }
+      await invoke("load_map", { path });
       currentFilePath = path;
       isDirty = false;
       await loadMapState(true);
@@ -123,20 +122,18 @@ async function saveMap(saveAs = false) {
       path = await save({
         filters: [
           { name: 'FreeMind', extensions: ['mm'] },
-          { name: 'XMind', extensions: ['xmind'] }
+          { name: 'XMind', extensions: ['xmind'] },
+          { name: 'OPML', extensions: ['opml'] },
+          { name: 'MindManager', extensions: ['mmap'] },
+          { name: 'MindNode', extensions: ['mindnode'] },
+          { name: 'SimpleMind', extensions: ['smmx'] }
         ],
         defaultPath: currentFilePath || undefined
       });
     }
 
     if (path) {
-      const isXmind = path.toLowerCase().endsWith('.xmind');
-      let savedPath: string;
-      if (isXmind) {
-        savedPath = await invoke<string>("save_xmind", { path });
-      } else {
-        savedPath = await invoke<string>("save_map", { path });
-      }
+      const savedPath = await invoke<string>("save_map", { path });
       currentFilePath = savedPath;
       isDirty = false;
       await updateTitle();
