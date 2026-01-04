@@ -91,11 +91,20 @@ async function openMap() {
     const path = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: 'MindMap', extensions: ['mm', 'xml'] }]
+      filters: [
+        { name: 'MindMap Files', extensions: ['mm', 'xmind'] },
+        { name: 'FreeMind', extensions: ['mm'] },
+        { name: 'XMind', extensions: ['xmind'] }
+      ]
     });
 
     if (path) {
-      await invoke("load_map", { path });
+      const isXmind = path.toLowerCase().endsWith('.xmind');
+      if (isXmind) {
+        await invoke("load_xmind", { path });
+      } else {
+        await invoke("load_map", { path });
+      }
       currentFilePath = path;
       isDirty = false;
       await loadMapState(true);
@@ -112,14 +121,22 @@ async function saveMap(saveAs = false) {
 
     if (saveAs || !path) {
       path = await save({
-        filters: [{ name: 'MindMap', extensions: ['mm', 'xml'] }],
+        filters: [
+          { name: 'FreeMind', extensions: ['mm'] },
+          { name: 'XMind', extensions: ['xmind'] }
+        ],
         defaultPath: currentFilePath || undefined
       });
     }
 
     if (path) {
-      // Invoking save_map with path updates the backend state
-      const savedPath = await invoke<string>("save_map", { path });
+      const isXmind = path.toLowerCase().endsWith('.xmind');
+      let savedPath: string;
+      if (isXmind) {
+        savedPath = await invoke<string>("save_xmind", { path });
+      } else {
+        savedPath = await invoke<string>("save_map", { path });
+      }
       currentFilePath = savedPath;
       isDirty = false;
       await updateTitle();

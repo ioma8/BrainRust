@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 use brain_core::{MindMap, Navigation};
 use brain_core::storage::{to_xml, from_xml};
+use brain_core::xmind::{to_xmind, from_xmind};
 use tauri::{State, Emitter};
 
 struct AppState {
@@ -127,6 +128,34 @@ fn remove_last_icon(state: State<AppState>, node_id: String) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+fn save_xmind(state: State<AppState>, path: String) -> Result<String, String> {
+    let map = state.map.lock().unwrap();
+    let content = to_xmind(&map)?;
+    
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    
+    let mut current_path = state.file_path.lock().unwrap();
+    *current_path = Some(path.clone());
+    
+    Ok(path)
+}
+
+#[tauri::command]
+fn load_xmind(state: State<AppState>, path: String) -> Result<(), String> {
+    let content = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let new_map = from_xmind(&content)?;
+    
+    let mut map = state.map.lock().unwrap();
+    *map = new_map;
+    map.compute_layout();
+    
+    let mut current_path = state.file_path.lock().unwrap();
+    *current_path = Some(path);
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut map = MindMap::new();
@@ -152,7 +181,9 @@ pub fn run() {
             save_map,
             load_map,
             add_icon,
-            remove_last_icon
+            remove_last_icon,
+            save_xmind,
+            load_xmind
         ])
         .setup(|app| {
              let handle = app.handle();
