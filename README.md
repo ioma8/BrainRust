@@ -26,6 +26,9 @@ A fast, cross-platform mind mapping application built with **Tauri + Rust + Canv
 git clone https://github.com/YOUR_USERNAME/BrainRust.git
 cd BrainRust
 
+# Fetch submodules (brain_core lives here)
+git submodule update --init --recursive
+
 # Install dependencies
 npm install
 
