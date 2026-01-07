@@ -242,6 +242,7 @@ pub fn run() {
             let handle = app.handle();
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
+            #[cfg(target_os = "macos")]
             let file_menu = Submenu::with_items(
                 handle,
                 "File",
@@ -251,7 +252,33 @@ pub fn run() {
                     &MenuItem::with_id(handle, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
                     &PredefinedMenuItem::separator(handle)?,
                     &MenuItem::with_id(handle, "save", "Save", true, Some("CmdOrCtrl+S"))?,
-                    &MenuItem::with_id(handle, "save_as", "Save As...", true, Some("CmdOrCtrl+Shift+S"))?,
+                    &MenuItem::with_id(
+                        handle,
+                        "save_as",
+                        "Save As...",
+                        true,
+                        Some("CmdOrCtrl+Shift+S"),
+                    )?,
+                ],
+            )?;
+
+            #[cfg(not(target_os = "macos"))]
+            let file_menu = Submenu::with_items(
+                handle,
+                "File",
+                true,
+                &[
+                    &MenuItem::with_id(handle, "new", "New", true, Some("CmdOrCtrl+N"))?,
+                    &MenuItem::with_id(handle, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
+                    &PredefinedMenuItem::separator(handle)?,
+                    &MenuItem::with_id(handle, "save", "Save", true, Some("CmdOrCtrl+S"))?,
+                    &MenuItem::with_id(
+                        handle,
+                        "save_as",
+                        "Save As...",
+                        true,
+                        Some("CmdOrCtrl+Shift+S"),
+                    )?,
                     &PredefinedMenuItem::separator(handle)?,
                     &MenuItem::with_id(handle, "exit", "Exit", true, Some("CmdOrCtrl+Q"))?,
                 ],
@@ -287,6 +314,34 @@ pub fn run() {
                 ],
             )?;
 
+            #[cfg(target_os = "macos")]
+            let app_menu = Submenu::with_items(
+                handle,
+                "BrainRust",
+                true,
+                &[
+                    &MenuItem::with_id(
+                        handle,
+                        "about",
+                        "About BrainRust",
+                        true,
+                        None::<&str>,
+                    )?,
+                    &PredefinedMenuItem::separator(handle)?,
+                    &MenuItem::with_id(
+                        handle,
+                        "exit",
+                        "Quit BrainRust",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?,
+                ],
+            )?;
+
+            #[cfg(target_os = "macos")]
+            let help_menu = Submenu::with_items(handle, "Help", true, &[])?;
+
+            #[cfg(not(target_os = "macos"))]
             let help_menu = Submenu::with_items(
                 handle,
                 "Help",
@@ -300,6 +355,10 @@ pub fn run() {
                 )?],
             )?;
 
+            #[cfg(target_os = "macos")]
+            let menu = Menu::with_items(handle, &[&app_menu, &file_menu, &edit_menu, &help_menu])?;
+
+            #[cfg(not(target_os = "macos"))]
             let menu = Menu::with_items(handle, &[&file_menu, &edit_menu, &help_menu])?;
             app.set_menu(menu)?;
 
