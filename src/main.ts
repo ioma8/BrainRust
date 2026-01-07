@@ -44,20 +44,22 @@ type ThemeColors = {
   nodeBorderSelected: string;
   nodeSelectedGlow: string;
   text: string;
+  textSelected: string;
 };
 
 const THEME_STORAGE_KEY = "brainrust-theme";
 
 let currentTheme: Theme = "dark";
 let themeColors: ThemeColors = {
-  canvasBg: "#242424",
-  edge: "#888",
-  node: "#3a3a3a",
-  nodeSelected: "#646cff",
-  nodeBorder: "#555",
-  nodeBorderSelected: "#fff",
-  nodeSelectedGlow: "rgba(100, 108, 255, 0.5)",
-  text: "#fff"
+  canvasBg: "#f5f6f8",
+  edge: "#b1b7c0",
+  node: "#ffffff",
+  nodeSelected: "#3f6fe5",
+  nodeBorder: "#d7dce3",
+  nodeBorderSelected: "#2f56b8",
+  nodeSelectedGlow: "rgba(63, 111, 229, 0.32)",
+  text: "#1f2328",
+  textSelected: "#ffffff"
 };
 
 // --- Lifecycle Helpers ---
@@ -104,7 +106,8 @@ function updateThemeColors() {
     nodeBorder: getCssVar("--node-border", themeColors.nodeBorder),
     nodeBorderSelected: getCssVar("--node-selected-border", themeColors.nodeBorderSelected),
     nodeSelectedGlow: getCssVar("--node-selected-glow", themeColors.nodeSelectedGlow),
-    text: getCssVar("--text-color", themeColors.text)
+    text: getCssVar("--text-color", themeColors.text),
+    textSelected: getCssVar("--text-color-selected", themeColors.textSelected)
   };
 }
 
@@ -130,8 +133,7 @@ function applyTheme(theme: Theme, persist = true) {
 function initTheme() {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
   const isStoredTheme = stored === "light" || stored === "dark";
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-  const initialTheme = (isStoredTheme ? stored : (prefersDark ? "dark" : "light")) as Theme;
+  const initialTheme = (isStoredTheme ? stored : "light") as Theme;
   applyTheme(initialTheme, isStoredTheme);
 }
 
@@ -570,7 +572,7 @@ function drawNode(node: Node, isSelected: boolean) {
   ctx.stroke();
 
   // Text & Icons
-  ctx.fillStyle = themeColors.text;
+  ctx.fillStyle = isSelected ? themeColors.textSelected : themeColors.text;
   ctx.font = NODE_FONT;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
