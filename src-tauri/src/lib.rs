@@ -247,13 +247,13 @@ pub fn run() {
                 "File",
                 true,
                 &[
-                    &MenuItem::with_id(handle, "new", "New", true, None::<&str>)?,
-                    &MenuItem::with_id(handle, "open", "Open...", true, None::<&str>)?,
+                    &MenuItem::with_id(handle, "new", "New", true, Some("CmdOrCtrl+N"))?,
+                    &MenuItem::with_id(handle, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
                     &PredefinedMenuItem::separator(handle)?,
-                    &MenuItem::with_id(handle, "save", "Save", true, None::<&str>)?,
-                    &MenuItem::with_id(handle, "save_as", "Save As...", true, None::<&str>)?,
+                    &MenuItem::with_id(handle, "save", "Save", true, Some("CmdOrCtrl+S"))?,
+                    &MenuItem::with_id(handle, "save_as", "Save As...", true, Some("CmdOrCtrl+Shift+S"))?,
                     &PredefinedMenuItem::separator(handle)?,
-                    &MenuItem::with_id(handle, "exit", "Exit", true, None::<&str>)?,
+                    &MenuItem::with_id(handle, "exit", "Exit", true, Some("CmdOrCtrl+Q"))?,
                 ],
             )?;
 
