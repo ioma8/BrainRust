@@ -338,9 +338,6 @@ pub fn run() {
                 ],
             )?;
 
-            #[cfg(target_os = "macos")]
-            let help_menu = Submenu::with_items(handle, "Help", true, &[])?;
-
             #[cfg(not(target_os = "macos"))]
             let help_menu = Submenu::with_items(
                 handle,
@@ -356,7 +353,7 @@ pub fn run() {
             )?;
 
             #[cfg(target_os = "macos")]
-            let menu = Menu::with_items(handle, &[&app_menu, &file_menu, &edit_menu, &help_menu])?;
+            let menu = Menu::with_items(handle, &[&app_menu, &file_menu, &edit_menu])?;
 
             #[cfg(not(target_os = "macos"))]
             let menu = Menu::with_items(handle, &[&file_menu, &edit_menu, &help_menu])?;
