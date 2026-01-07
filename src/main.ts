@@ -3,6 +3,7 @@ import { save, open, ask, confirm } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { MindMap, Node } from "./types";
+import "./fonts.css";
 
 const canvas = document.getElementById("mindmap-canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -15,6 +16,8 @@ let sidebarWidth = sidebarEl?.offsetWidth || 40;
 const H_GAP = 50;
 const V_GAP = 20;
 const MIN_NODE_WIDTH = 100;
+const NODE_FONT = '14px "Inter", sans-serif';
+const NODE_FONT_LOAD = '14px "Inter"';
 
 let mindMap: MindMap | null = null;
 let offset = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -56,6 +59,16 @@ async function markDirty() {
   if (!isDirty) {
     isDirty = true;
     await updateTitle();
+  }
+}
+
+async function ensureFontsLoaded() {
+  if (!document.fonts) return;
+  try {
+    await document.fonts.load(NODE_FONT_LOAD);
+    await document.fonts.ready;
+  } catch (e) {
+    console.warn("Failed to load fonts", e);
   }
 }
 
@@ -449,7 +462,7 @@ function render() {
 }
 
 function getNodeWidth(node: Node): number {
-  ctx.font = "14px Inter";
+  ctx.font = NODE_FONT;
   const textW = ctx.measureText(node.content).width;
   const iconsW = (node.icons ? node.icons.length * 20 : 0);
   return textW + iconsW + 20; // 20 padding
@@ -480,7 +493,7 @@ function drawNode(node: Node, isSelected: boolean) {
 
   // Text & Icons
   ctx.fillStyle = "#fff";
-  ctx.font = "14px Inter";
+  ctx.font = NODE_FONT;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
 
@@ -782,16 +795,19 @@ editor.addEventListener("blur", () => {
 });
 
 // Init
-resize();
-updateTitle();
-loadMapState(true);
+async function initialize() {
+  await ensureFontsLoaded();
+  resize();
+  await updateTitle();
+  await loadMapState(true);
 
-// Get initial file path from backend (in case of restart with state?? probably empty)
-invoke<string | null>("get_file_path")
-  .then(p => {
-    currentFilePath = p;
-    updateTitle();
-  })
-  .catch(() => {
+  // Get initial file path from backend (in case of restart with state?? probably empty)
+  try {
+    currentFilePath = await invoke<string | null>("get_file_path");
+    await updateTitle();
+  } catch {
     // Non-fatal: title will remain based on current client state.
-  });
+  }
+}
+
+void initialize();
