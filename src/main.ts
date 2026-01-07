@@ -237,12 +237,28 @@ async function createNewMap() {
   }
 }
 
-async function openMap() {
-  if (isDirty) {
-    const yes = await ask("You have unsaved changes. Discard them?", { kind: 'warning', title: 'Unsaved Changes' });
-    if (!yes) return;
-  }
+async function confirmDiscardChanges(): Promise<boolean> {
+  if (!isDirty) return true;
+  const yes = await ask("You have unsaved changes. Discard them?", { kind: 'warning', title: 'Unsaved Changes' });
+  return !!yes;
+}
 
+async function openMapPath(path: string) {
+  const canOpen = await confirmDiscardChanges();
+  if (!canOpen) return;
+
+  try {
+    await invoke("load_map", { path });
+    currentFilePath = path;
+    isDirty = false;
+    await loadMapState(true);
+    await updateTitle();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function openMap() {
   try {
     const path = await open({
       multiple: false,
@@ -258,12 +274,8 @@ async function openMap() {
       ]
     });
 
-    if (path) {
-      await invoke("load_map", { path });
-      currentFilePath = path;
-      isDirty = false;
-      await loadMapState(true);
-      await updateTitle();
+    if (typeof path === "string") {
+      await openMapPath(path);
     }
   } catch (e) {
     console.error(e);
@@ -345,6 +357,12 @@ listen("menu-event", async (event) => {
       await ask("BrainRust v0.1.0\n\nA FreeMind-compatible mind mapping tool built with Tauri + Rust + Canvas.", { title: "About BrainRust", kind: 'info' });
       break;
   }
+});
+
+listen("menu-open-recent", async (event) => {
+  const path = event.payload as string;
+  if (!path) return;
+  await openMapPath(path);
 });
 
 // --- Close Listener ---
