@@ -1,0 +1,3 @@
+[submodule "src-tauri/brain_core"]
+	path = src-tauri/brain_core
+	url = https://github.com/ioma8/brain_core
