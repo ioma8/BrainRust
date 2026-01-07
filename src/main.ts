@@ -9,6 +9,7 @@ const canvas = document.getElementById("mindmap-canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const editor = document.getElementById("node-editor") as HTMLInputElement;
 const sidebarEl = document.getElementById("sidebar") as HTMLElement;
+const themeToggle = document.getElementById("theme-toggle") as HTMLButtonElement | null;
 
 const NODE_HEIGHT = 30;
 let sidebarWidth = sidebarEl?.offsetWidth || 40;
@@ -31,6 +32,33 @@ let currentFilePath: string | null = null;
 let isDirty = false;
 
 const appWindow = getCurrentWindow();
+
+type Theme = "light" | "dark";
+
+type ThemeColors = {
+  canvasBg: string;
+  edge: string;
+  node: string;
+  nodeSelected: string;
+  nodeBorder: string;
+  nodeBorderSelected: string;
+  nodeSelectedGlow: string;
+  text: string;
+};
+
+const THEME_STORAGE_KEY = "brainrust-theme";
+
+let currentTheme: Theme = "dark";
+let themeColors: ThemeColors = {
+  canvasBg: "#242424",
+  edge: "#888",
+  node: "#3a3a3a",
+  nodeSelected: "#646cff",
+  nodeBorder: "#555",
+  nodeBorderSelected: "#fff",
+  nodeSelectedGlow: "rgba(100, 108, 255, 0.5)",
+  text: "#fff"
+};
 
 // --- Lifecycle Helpers ---
 
@@ -62,6 +90,51 @@ async function markDirty() {
   }
 }
 
+function getCssVar(name: string, fallback: string) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function updateThemeColors() {
+  themeColors = {
+    canvasBg: getCssVar("--canvas-bg", themeColors.canvasBg),
+    edge: getCssVar("--edge-color", themeColors.edge),
+    node: getCssVar("--node-bg", themeColors.node),
+    nodeSelected: getCssVar("--node-selected-bg", themeColors.nodeSelected),
+    nodeBorder: getCssVar("--node-border", themeColors.nodeBorder),
+    nodeBorderSelected: getCssVar("--node-selected-border", themeColors.nodeBorderSelected),
+    nodeSelectedGlow: getCssVar("--node-selected-glow", themeColors.nodeSelectedGlow),
+    text: getCssVar("--text-color", themeColors.text)
+  };
+}
+
+function updateThemeToggle() {
+  if (!themeToggle) return;
+  const nextLabel = currentTheme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  themeToggle.setAttribute("aria-label", nextLabel);
+  themeToggle.setAttribute("title", nextLabel);
+  themeToggle.setAttribute("aria-pressed", currentTheme === "dark" ? "true" : "false");
+}
+
+function applyTheme(theme: Theme, persist = true) {
+  currentTheme = theme;
+  document.documentElement.setAttribute("data-theme", theme);
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }
+  updateThemeColors();
+  updateThemeToggle();
+  render();
+}
+
+function initTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  const isStoredTheme = stored === "light" || stored === "dark";
+  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const initialTheme = (isStoredTheme ? stored : (prefersDark ? "dark" : "light")) as Theme;
+  applyTheme(initialTheme, isStoredTheme);
+}
+
 async function ensureFontsLoaded() {
   if (!document.fonts) return;
   try {
@@ -71,6 +144,10 @@ async function ensureFontsLoaded() {
     console.warn("Failed to load fonts", e);
   }
 }
+
+themeToggle?.addEventListener("click", () => {
+  applyTheme(currentTheme === "dark" ? "light" : "dark");
+});
 
 async function loadMapState(fit = false) {
   try {
@@ -426,11 +503,11 @@ function render() {
   const height = window.innerHeight;
 
   // Clear
-  ctx.fillStyle = "#242424";
+  ctx.fillStyle = themeColors.canvasBg;
   ctx.fillRect(0, 0, width, height);
 
   // Draw Edges
-  ctx.strokeStyle = "#888";
+  ctx.strokeStyle = themeColors.edge;
   ctx.lineWidth = 2;
 
   Object.values(mindMap.nodes).forEach(node => {
@@ -475,11 +552,12 @@ function drawNode(node: Node, isSelected: boolean) {
   const y = node.y + offset.y;
 
   // Background
-  ctx.fillStyle = isSelected ? "#646cff" : "#3a3a3a";
+  ctx.fillStyle = isSelected ? themeColors.nodeSelected : themeColors.node;
   if (isSelected) {
-    ctx.shadowColor = "rgba(100, 108, 255, 0.5)";
+    ctx.shadowColor = themeColors.nodeSelectedGlow;
     ctx.shadowBlur = 10;
   } else {
+    ctx.shadowColor = "transparent";
     ctx.shadowBlur = 0;
   }
 
@@ -487,12 +565,12 @@ function drawNode(node: Node, isSelected: boolean) {
   ctx.fill();
 
   // Border
-  ctx.strokeStyle = isSelected ? "#fff" : "#555";
+  ctx.strokeStyle = isSelected ? themeColors.nodeBorderSelected : themeColors.nodeBorder;
   ctx.lineWidth = isSelected ? 2 : 1;
   ctx.stroke();
 
   // Text & Icons
-  ctx.fillStyle = "#fff";
+  ctx.fillStyle = themeColors.text;
   ctx.font = NODE_FONT;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -796,6 +874,7 @@ editor.addEventListener("blur", () => {
 
 // Init
 async function initialize() {
+  initTheme();
   await ensureFontsLoaded();
   resize();
   await updateTitle();

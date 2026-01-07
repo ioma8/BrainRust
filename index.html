@@ -7,28 +7,110 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BrainRust</title>
   <style>
+    :root {
+      color-scheme: dark;
+      --app-bg: #242424;
+      --canvas-bg: #242424;
+      --sidebar-bg: #333;
+      --sidebar-border: #555;
+      --toolbar-border: #444;
+      --node-bg: #3a3a3a;
+      --node-selected-bg: #646cff;
+      --node-border: #555;
+      --node-selected-border: #fff;
+      --node-selected-glow: rgba(100, 108, 255, 0.5);
+      --edge-color: #888;
+      --text-color: #fff;
+      --editor-bg: #3a3a3a;
+      --editor-border: #646cff;
+      --toggle-bg: #1f1f1f;
+      --toggle-border: #3b3b3b;
+      --toggle-knob: #bfbfbf;
+      --toggle-bg-hover: #2a2a2a;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --app-bg: #f6f6f6;
+      --canvas-bg: #f6f6f6;
+      --sidebar-bg: #ececec;
+      --sidebar-border: #d0d0d0;
+      --toolbar-border: #dedede;
+      --node-bg: #ffffff;
+      --node-selected-bg: #2f6bff;
+      --node-border: #c7c7c7;
+      --node-selected-border: #1f49b3;
+      --node-selected-glow: rgba(47, 107, 255, 0.35);
+      --edge-color: #9aa0a6;
+      --text-color: #111;
+      --editor-bg: #ffffff;
+      --editor-border: #2f6bff;
+      --toggle-bg: #d9d9d9;
+      --toggle-border: #bfbfbf;
+      --toggle-knob: #ffffff;
+      --toggle-bg-hover: #cfcfcf;
+    }
+
     body {
       margin: 0;
       overflow: hidden;
-      background: #242424;
-      font-family: Inter, sans-serif;
+      background: var(--app-bg);
+      color: var(--text-color);
+      font-family: "Inter", sans-serif;
     }
 
     #mindmap-canvas {
       display: block;
+      background: var(--canvas-bg);
     }
 
     #node-editor {
       position: absolute;
       display: none;
-      background: #3a3a3a;
-      color: white;
-      border: 2px solid #646cff;
+      background: var(--editor-bg);
+      color: var(--text-color);
+      border: 2px solid var(--editor-border);
       border-radius: 5px;
       padding: 5px;
-      font-family: Inter, sans-serif;
+      font-family: "Inter", sans-serif;
       font-size: 14px;
       z-index: 10;
+    }
+
+    .theme-toggle {
+      width: 28px;
+      height: 16px;
+      border-radius: 999px;
+      border: 1px solid var(--toggle-border);
+      background: var(--toggle-bg);
+      position: relative;
+      padding: 0;
+      cursor: pointer;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+
+    .theme-toggle::after {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--toggle-knob);
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      transition: transform 150ms ease;
+    }
+
+    :root[data-theme="light"] .theme-toggle::after {
+      transform: translateX(12px);
+    }
+
+    .theme-toggle:hover {
+      background: var(--toggle-bg-hover);
+    }
+
+    #toolbar-fixed .theme-toggle {
+      margin-bottom: 8px;
     }
 
     /* Custom Scrollbar for Toolbar - Overlay style */
@@ -72,9 +154,10 @@
 
 <body>
   <div id="sidebar"
-    style="position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background: #333; display: flex; flex-direction: column; border-right: 1px solid #555; z-index: 20;">
+    style="position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background: var(--sidebar-bg); display: flex; flex-direction: column; border-right: 1px solid var(--sidebar-border); z-index: 20;">
     <div id="toolbar-fixed"
-      style="width: 100%; display: flex; flex-direction: column; align-items: center; padding: 10px 0; flex-shrink: 0; background: #333; border-bottom: 1px solid #444;">
+      style="width: 100%; display: flex; flex-direction: column; align-items: center; padding: 10px 0; flex-shrink: 0; background: var(--sidebar-bg); border-bottom: 1px solid var(--toolbar-border);">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"></button>
     </div>
     <div id="toolbar-scrollable"
       style="width: 100%; display: flex; flex-direction: column; align-items: center; overflow-y: auto; overflow-x: hidden; flex-grow: 1; padding: 5px 0;">
