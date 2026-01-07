@@ -9,10 +9,14 @@ const canvas = document.getElementById("mindmap-canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const editor = document.getElementById("node-editor") as HTMLInputElement;
 const sidebarEl = document.getElementById("sidebar") as HTMLElement;
+const tabsEl = document.getElementById("tabs") as HTMLElement;
+const newTabBtn = document.getElementById("new-tab-btn") as HTMLButtonElement;
+const tabBarEl = document.getElementById("tab-bar") as HTMLElement;
 const themeToggle = document.getElementById("theme-toggle") as HTMLButtonElement | null;
 
 const NODE_HEIGHT = 30;
 let sidebarWidth = sidebarEl?.offsetWidth || 40;
+let tabBarHeight = tabBarEl?.offsetHeight || 0;
 
 const H_GAP = 50;
 const V_GAP = 20;
@@ -21,19 +25,28 @@ const NODE_FONT = '14px "Inter", sans-serif';
 const NODE_FONT_LOAD = '14px "Inter"';
 
 let mindMap: MindMap | null = null;
-let offset = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+let offset = defaultOffset();
 let isEditing = false;
 let isDragging = false;
 let dragStart = { x: 0, y: 0 };
 let lastOffset = { x: 0, y: 0 };
 
-// Lifecycle State
-let currentFilePath: string | null = null;
-let isDirty = false;
-
 const appWindow = getCurrentWindow();
 
 type Theme = "light" | "dark";
+
+type TabState = {
+  id: string;
+  title: string;
+  filePath: string | null;
+  isDirty: boolean;
+  map: MindMap | null;
+  offset: { x: number; y: number };
+};
+
+let tabs: TabState[] = [];
+let activeTabId: string | null = null;
+let untitledCounter = 1;
 
 type ThemeColors = {
   canvasBg: string;
@@ -65,18 +78,9 @@ let themeColors: ThemeColors = {
 // --- Lifecycle Helpers ---
 
 async function updateTitle() {
-  let title = "BrainRust";
-  if (currentFilePath) {
-    // Extract filename from path (basic splitting)
-    const name = currentFilePath.split(/[\\/]/).pop() || currentFilePath;
-    title = `${name}`;
-  } else {
-    title = "Untitled";
-  }
-
-  if (isDirty) {
-    title += "*";
-  }
+  const tab = getActiveTab();
+  let title = tab?.title || "BrainRust";
+  if (tab?.isDirty) title += "*";
 
   try {
     await appWindow.setTitle(title);
@@ -86,10 +90,15 @@ async function updateTitle() {
 }
 
 async function markDirty() {
-  if (!isDirty) {
-    isDirty = true;
-    await updateTitle();
-  }
+  const tab = getActiveTab();
+  if (!tab || tab.isDirty) return;
+  tab.isDirty = true;
+  renderTabs();
+  await updateTitle();
+}
+
+function getActiveTab(): TabState | null {
+  return tabs.find((tab) => tab.id === activeTabId) || null;
 }
 
 function getCssVar(name: string, fallback: string) {
@@ -151,14 +160,180 @@ themeToggle?.addEventListener("click", () => {
   applyTheme(currentTheme === "dark" ? "light" : "dark");
 });
 
-async function loadMapState(fit = false) {
+newTabBtn.addEventListener("click", () => {
+  void createNewTab();
+});
+
+async function loadMapState(tabId: string, fit = false) {
+  const tab = tabs.find((item) => item.id === tabId);
+  if (!tab) return;
   try {
-    mindMap = await invoke<MindMap>("get_map");
+    mindMap = await invoke<MindMap>("get_map", { tabId });
+    tab.map = mindMap;
     computeLayout();
     render();
     if (fit) fitView();
+    tab.offset = { ...offset };
   } catch (e) {
     console.error("Failed to load map:", e);
+  }
+}
+
+function syncActiveTabState() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  tab.offset = { ...offset };
+  tab.map = mindMap;
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function updateTabTitle(tab: TabState) {
+  if (tab.filePath) {
+    tab.title = fileNameFromPath(tab.filePath);
+  }
+}
+
+function renderTabs() {
+  tabsEl.innerHTML = "";
+  tabs.forEach((tab) => {
+    const tabEl = document.createElement("div");
+    tabEl.className = `tab${tab.id === activeTabId ? " active" : ""}`;
+    tabEl.setAttribute("role", "tab");
+    tabEl.setAttribute("aria-selected", tab.id === activeTabId ? "true" : "false");
+    tabEl.title = tab.filePath || tab.title;
+    tabEl.addEventListener("click", () => switchToTab(tab.id));
+
+    const titleEl = document.createElement("span");
+    titleEl.className = "tab-title";
+    titleEl.textContent = `${tab.title}${tab.isDirty ? "*" : ""}`;
+
+    const closeEl = document.createElement("span");
+    closeEl.className = "tab-close";
+    closeEl.textContent = "×";
+    closeEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeTab(tab.id);
+    });
+
+    tabEl.appendChild(titleEl);
+    tabEl.appendChild(closeEl);
+    tabsEl.appendChild(tabEl);
+  });
+  tabsEl.appendChild(newTabBtn);
+}
+
+function switchToTab(tabId: string) {
+  if (tabId === activeTabId) return;
+  syncActiveTabState();
+  activeTabId = tabId;
+  const tab = getActiveTab();
+  if (!tab) return;
+  offset = { ...tab.offset };
+  mindMap = tab.map;
+  renderTabs();
+  if (mindMap) {
+    computeLayout();
+    render();
+  } else {
+    void loadMapState(tabId, true);
+  }
+  void updateTitle();
+}
+
+function cycleTab(step: number) {
+  if (tabs.length < 2 || !activeTabId) return;
+  const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+  if (currentIndex === -1) return;
+  const nextIndex = (currentIndex + step + tabs.length) % tabs.length;
+  switchToTab(tabs[nextIndex].id);
+}
+
+function defaultOffset() {
+  const viewportW = window.innerWidth - sidebarWidth;
+  const viewportH = window.innerHeight - tabBarHeight;
+  return { x: viewportW / 2, y: viewportH / 2 };
+}
+
+async function createNewTab() {
+  syncActiveTabState();
+  const tabId = crypto.randomUUID();
+  const tab: TabState = {
+    id: tabId,
+    title: `Untitled ${untitledCounter++}`,
+    filePath: null,
+    isDirty: false,
+    map: null,
+    offset: defaultOffset()
+  };
+  tabs.push(tab);
+  activeTabId = tabId;
+  renderTabs();
+
+  try {
+    mindMap = await invoke<MindMap>("new_map", { tabId });
+    tab.map = mindMap;
+    offset = { ...tab.offset };
+    computeLayout();
+    render();
+    fitView();
+    tab.offset = { ...offset };
+    await updateTitle();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function closeTab(tabId: string) {
+  const tabIndex = tabs.findIndex((tab) => tab.id === tabId);
+  if (tabIndex === -1) return;
+  const tab = tabs[tabIndex];
+  if (tab.isDirty) {
+    const confirmed = await confirm("You have unsaved changes. Close this tab?", {
+      kind: "warning",
+      title: "Unsaved Changes"
+    });
+    if (!confirmed) return;
+  }
+
+  if (tabId === activeTabId) {
+    syncActiveTabState();
+  }
+
+  try {
+    await invoke("close_tab", { tabId });
+  } catch (e) {
+    console.error(e);
+  }
+
+  tabs.splice(tabIndex, 1);
+
+  if (tabs.length === 0) {
+    activeTabId = null;
+    mindMap = null;
+    await createNewTab();
+    return;
+  }
+
+  if (tabId === activeTabId) {
+    const nextTab = tabs[tabIndex] || tabs[tabIndex - 1];
+    if (nextTab) {
+      activeTabId = nextTab.id;
+      offset = { ...nextTab.offset };
+      mindMap = nextTab.map;
+      renderTabs();
+      if (mindMap) {
+        computeLayout();
+        render();
+      } else {
+        await loadMapState(nextTab.id, true);
+      }
+      await updateTitle();
+    }
+  } else {
+    renderTabs();
   }
 }
 
@@ -219,39 +394,39 @@ function layoutNode(nodeId: string, x: number, startY: number): number {
 // --- File Operations ---
 
 async function createNewMap() {
-  if (isDirty) {
-    const yes = await ask("You have unsaved changes. Discard them?", { kind: 'warning', title: 'Unsaved Changes' });
-    if (!yes) return;
-  }
-
-  try {
-    mindMap = await invoke<MindMap>("new_map");
-    currentFilePath = null;
-    isDirty = false;
-    await updateTitle();
-    computeLayout();
-    render();
-    fitView();
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-async function confirmDiscardChanges(): Promise<boolean> {
-  if (!isDirty) return true;
-  const yes = await ask("You have unsaved changes. Discard them?", { kind: 'warning', title: 'Unsaved Changes' });
-  return !!yes;
+  await createNewTab();
 }
 
 async function openMapPath(path: string) {
-  const canOpen = await confirmDiscardChanges();
-  if (!canOpen) return;
+  const existingTab = tabs.find((tab) => tab.filePath === path);
+  if (existingTab) {
+    switchToTab(existingTab.id);
+    return;
+  }
+
+  syncActiveTabState();
+  const tabId = crypto.randomUUID();
+  const tab: TabState = {
+    id: tabId,
+    title: fileNameFromPath(path),
+    filePath: path,
+    isDirty: false,
+    map: null,
+    offset: defaultOffset()
+  };
+  tabs.push(tab);
+  activeTabId = tabId;
+  offset = { ...tab.offset };
+  renderTabs();
 
   try {
-    await invoke("load_map", { path });
-    currentFilePath = path;
-    isDirty = false;
-    await loadMapState(true);
+    await invoke("new_map", { tabId });
+    await invoke("load_map", { tabId, path });
+    await loadMapState(tabId, true);
+    tab.filePath = path;
+    updateTabTitle(tab);
+    tab.isDirty = false;
+    renderTabs();
     await updateTitle();
   } catch (e) {
     console.error(e);
@@ -283,8 +458,10 @@ async function openMap() {
 }
 
 async function saveMap(saveAs = false) {
+  const tab = getActiveTab();
+  if (!tab) return;
   try {
-    let path = currentFilePath;
+    let path = tab.filePath;
 
     if (saveAs || !path) {
       path = await save({
@@ -296,14 +473,16 @@ async function saveMap(saveAs = false) {
           { name: 'MindNode', extensions: ['mindnode'] },
           { name: 'SimpleMind', extensions: ['smmx'] }
         ],
-        defaultPath: currentFilePath || undefined
+        defaultPath: tab.filePath || undefined
       });
     }
 
     if (path) {
-      const savedPath = await invoke<string>("save_map", { path });
-      currentFilePath = savedPath;
-      isDirty = false;
+      const savedPath = await invoke<string>("save_map", { tabId: tab.id, path });
+      tab.filePath = savedPath;
+      updateTabTitle(tab);
+      tab.isDirty = false;
+      renderTabs();
       await updateTitle();
     }
   } catch (e) {
@@ -322,33 +501,47 @@ listen("menu-event", async (event) => {
     case "save_as": saveMap(true); break;
     case "exit": appWindow.close(); break;
 
-    case "add_child":
-      if (mindMap) {
-        const newId = await invoke<string>("add_child", { parentId: mindMap.selected_node_id, content: "New Node" });
+    case "add_child": {
+      const tab = getActiveTab();
+      if (tab && mindMap) {
+        const newId = await invoke<string>("add_child", {
+          tabId: tab.id,
+          parentId: mindMap.selected_node_id,
+          content: "New Node"
+        });
         await markDirty();
-        await invoke("select_node", { nodeId: newId });
-        await loadMapState();
+        await invoke("select_node", { tabId: tab.id, nodeId: newId });
+        await loadMapState(tab.id);
         ensureVisible(newId);
         startEdit();
       }
       break;
-    case "add_sibling":
-      if (mindMap && mindMap.selected_node_id !== mindMap.root_id) {
-        const newId = await invoke<string>("add_sibling", { nodeId: mindMap.selected_node_id, content: "New Node" });
+    }
+    case "add_sibling": {
+      const tab = getActiveTab();
+      if (tab && mindMap && mindMap.selected_node_id !== mindMap.root_id) {
+        const newId = await invoke<string>("add_sibling", {
+          tabId: tab.id,
+          nodeId: mindMap.selected_node_id,
+          content: "New Node"
+        });
         await markDirty();
-        await invoke("select_node", { nodeId: newId });
-        await loadMapState();
+        await invoke("select_node", { tabId: tab.id, nodeId: newId });
+        await loadMapState(tab.id);
         ensureVisible(newId);
         startEdit();
       }
       break;
-    case "delete_node":
-      if (mindMap && mindMap.selected_node_id !== mindMap.root_id) {
-        await invoke("remove_node", { nodeId: mindMap.selected_node_id });
+    }
+    case "delete_node": {
+      const tab = getActiveTab();
+      if (tab && mindMap && mindMap.selected_node_id !== mindMap.root_id) {
+        await invoke("remove_node", { tabId: tab.id, nodeId: mindMap.selected_node_id });
         await markDirty();
-        await loadMapState();
+        await loadMapState(tab.id);
       }
       break;
+    }
     case "rename_node":
       startEdit();
       break;
@@ -367,7 +560,8 @@ listen("menu-open-recent", async (event) => {
 
 // --- Close Listener ---
 appWindow.onCloseRequested(async (event) => {
-  if (isDirty) {
+  const hasDirtyTabs = tabs.some((tab) => tab.isDirty);
+  if (hasDirtyTabs) {
     // Prevent the close
     event.preventDefault();
 
@@ -472,16 +666,17 @@ function createIconBtn(key: string): HTMLElement {
   btn.style.padding = "5px";
   btn.style.userSelect = "none";
   btn.onclick = async () => {
-    if (!mindMap) return;
+    const tab = getActiveTab();
+    if (!tab || !mindMap) return;
     const id = mindMap.selected_node_id;
 
     if (key === "trash") {
-      await invoke("remove_last_icon", { nodeId: id });
+      await invoke("remove_last_icon", { tabId: tab.id, nodeId: id });
     } else {
-      await invoke("add_icon", { nodeId: id, icon: key });
+      await invoke("add_icon", { tabId: tab.id, nodeId: id, icon: key });
     }
     await markDirty();
-    await loadMapState();
+    await loadMapState(tab.id);
   };
   return btn;
 }
@@ -506,10 +701,13 @@ Object.keys(iconMap).forEach(key => {
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   sidebarWidth = sidebarEl?.offsetWidth || sidebarWidth;
-  canvas.width = (window.innerWidth - sidebarWidth) * dpr;
-  canvas.height = window.innerHeight * dpr;
-  canvas.style.width = (window.innerWidth - sidebarWidth) + "px";
-  canvas.style.height = window.innerHeight + "px";
+  tabBarHeight = tabBarEl?.offsetHeight || tabBarHeight;
+  const viewportW = window.innerWidth - sidebarWidth;
+  const viewportH = window.innerHeight - tabBarHeight;
+  canvas.width = viewportW * dpr;
+  canvas.height = viewportH * dpr;
+  canvas.style.width = viewportW + "px";
+  canvas.style.height = viewportH + "px";
   // Reset transform so repeated resizes don't accumulate scaling.
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   render();
@@ -520,7 +718,7 @@ function render() {
   if (!mindMap) return;
 
   const width = window.innerWidth - sidebarWidth;
-  const height = window.innerHeight;
+  const height = window.innerHeight - tabBarHeight;
 
   // Clear
   ctx.fillStyle = themeColors.canvasBg;
@@ -642,7 +840,7 @@ function fitView() {
   const cx = minX + bboxW / 2;
   const cy = minY + bboxH / 2;
   const screenCx = (window.innerWidth - sidebarWidth) / 2;
-  const screenCy = window.innerHeight / 2;
+  const screenCy = (window.innerHeight - tabBarHeight) / 2;
 
   offset.x = screenCx - cx;
   offset.y = screenCy - cy;
@@ -661,7 +859,7 @@ function getNodeAt(x: number, y: number): Node | null {
   if (!mindMap) return null;
   // Convert from window coords to canvas coords.
   const canvasX = x - sidebarWidth;
-  const canvasY = y;
+  const canvasY = y - tabBarHeight;
 
   const p = screenToWorld(canvasX, canvasY);
   for (const node of Object.values(mindMap.nodes)) {
@@ -688,7 +886,7 @@ function ensureVisible(nodeId: string) {
 
   const padding = 50;
   const viewportW = window.innerWidth - sidebarWidth;
-  const viewportH = window.innerHeight;
+  const viewportH = window.innerHeight - tabBarHeight;
 
   let dx = 0;
   let dy = 0;
@@ -714,9 +912,10 @@ canvas.addEventListener("mousedown", async (e) => {
 
   const node = getNodeAt(e.clientX, e.clientY);
   if (node) {
-    if (mindMap && node.id !== mindMap.selected_node_id) {
-      await invoke("select_node", { nodeId: node.id });
-      await loadMapState();
+    const tab = getActiveTab();
+    if (tab && mindMap && node.id !== mindMap.selected_node_id) {
+      await invoke("select_node", { tabId: tab.id, nodeId: node.id });
+      await loadMapState(tab.id);
     }
   } else {
     isDragging = true;
@@ -758,12 +957,32 @@ canvas.addEventListener("dblclick", async (e) => {
     // Editor is fixed pos? No, absolute.
     // It's in body. So it needs left: canvasX + sidebarWidth
 
-    startEdit(canvasX + sidebarWidth, canvasY, w, h, node.content);
+    startEdit(canvasX + sidebarWidth, canvasY + tabBarHeight, w, h, node.content);
   }
 });
 
 // Keyboard
 window.addEventListener("keydown", async (e) => {
+  const isAccel = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  if (isAccel && key === "t") {
+    e.preventDefault();
+    await createNewTab();
+    return;
+  }
+  if (isAccel && key === "w") {
+    e.preventDefault();
+    if (activeTabId) {
+      await closeTab(activeTabId);
+    }
+    return;
+  }
+  if (isAccel && e.key === "Tab") {
+    e.preventDefault();
+    cycleTab(e.shiftKey ? -1 : 1);
+    return;
+  }
+
   if (isEditing) {
     if (e.key === "Enter") finishEdit();
     if (e.key === "Escape") cancelEdit();
@@ -773,14 +992,16 @@ window.addEventListener("keydown", async (e) => {
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
 
   try {
+    const tab = getActiveTab();
+    if (!tab) return;
     let moved = false;
-    if (e.key === "ArrowRight") { await invoke("navigate", { direction: "Right" }); moved = true; }
-    if (e.key === "ArrowLeft") { await invoke("navigate", { direction: "Left" }); moved = true; }
-    if (e.key === "ArrowDown") { await invoke("navigate", { direction: "Down" }); moved = true; }
-    if (e.key === "ArrowUp") { await invoke("navigate", { direction: "Up" }); moved = true; }
+    if (e.key === "ArrowRight") { await invoke("navigate", { tabId: tab.id, direction: "Right" }); moved = true; }
+    if (e.key === "ArrowLeft") { await invoke("navigate", { tabId: tab.id, direction: "Left" }); moved = true; }
+    if (e.key === "ArrowDown") { await invoke("navigate", { tabId: tab.id, direction: "Down" }); moved = true; }
+    if (e.key === "ArrowUp") { await invoke("navigate", { tabId: tab.id, direction: "Up" }); moved = true; }
 
     if (moved) {
-      await loadMapState();
+      await loadMapState(tab.id);
       if (mindMap) ensureVisible(mindMap.selected_node_id);
       return;
     }
@@ -794,21 +1015,21 @@ window.addEventListener("keydown", async (e) => {
       let success = false;
 
       if (e.key === "Insert") {
-        newId = await invoke("add_child", { parentId: mindMap.selected_node_id, content: "New Node" });
+        newId = await invoke("add_child", { tabId: tab.id, parentId: mindMap.selected_node_id, content: "New Node" });
         success = true;
       } else {
         if (mindMap.selected_node_id === mindMap.root_id) {
-          newId = await invoke("add_child", { parentId: mindMap.selected_node_id, content: "New Node" });
+          newId = await invoke("add_child", { tabId: tab.id, parentId: mindMap.selected_node_id, content: "New Node" });
         } else {
-          newId = await invoke("add_sibling", { nodeId: mindMap.selected_node_id, content: "New Node" });
+          newId = await invoke("add_sibling", { tabId: tab.id, nodeId: mindMap.selected_node_id, content: "New Node" });
         }
         success = true;
       }
 
       if (success) {
         await markDirty();
-        await invoke("select_node", { nodeId: newId });
-        await loadMapState();
+        await invoke("select_node", { tabId: tab.id, nodeId: newId });
+        await loadMapState(tab.id);
         ensureVisible(newId);
         startEdit();
       }
@@ -817,9 +1038,9 @@ window.addEventListener("keydown", async (e) => {
 
     if (e.key === "Delete") {
       if (mindMap && mindMap.selected_node_id !== mindMap.root_id) {
-        await invoke("remove_node", { nodeId: mindMap.selected_node_id });
+        await invoke("remove_node", { tabId: tab.id, nodeId: mindMap.selected_node_id });
         await markDirty();
-        await loadMapState();
+        await loadMapState(tab.id);
       }
     } else if (e.key === "F2") {
       startEdit();
@@ -850,7 +1071,7 @@ function startEdit(x?: number, y?: number, w?: number, h?: number, content?: str
     const nodeW = getNodeWidth(node);
     const nodeH = NODE_HEIGHT;
     x = node.x + offset.x + sidebarWidth;
-    y = node.y + offset.y;
+    y = node.y + offset.y + tabBarHeight;
     w = nodeW;
     h = nodeH;
   }
@@ -867,15 +1088,17 @@ function startEdit(x?: number, y?: number, w?: number, h?: number, content?: str
 
 async function finishEdit() {
   if (!mindMap || !isEditing) return;
+  const tab = getActiveTab();
+  if (!tab) return;
   const content = editor.value;
   const id = mindMap.selected_node_id;
 
   try {
-    await invoke("change_node", { nodeId: id, content });
+    await invoke("change_node", { tabId: tab.id, nodeId: id, content });
     await markDirty();
     editor.style.display = "none";
     isEditing = false;
-    await loadMapState();
+    await loadMapState(tab.id);
   } catch (e) {
     console.error(e);
   }
@@ -897,16 +1120,8 @@ async function initialize() {
   initTheme();
   await ensureFontsLoaded();
   resize();
-  await updateTitle();
-  await loadMapState(true);
-
-  // Get initial file path from backend (in case of restart with state?? probably empty)
-  try {
-    currentFilePath = await invoke<string | null>("get_file_path");
-    await updateTitle();
-  } catch {
-    // Non-fatal: title will remain based on current client state.
-  }
+  renderTabs();
+  await createNewTab();
 }
 
 void initialize();
