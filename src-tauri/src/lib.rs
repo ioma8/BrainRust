@@ -285,11 +285,12 @@ fn add_child(
     tab_id: String,
     parent_id: String,
     content: String,
-) -> Result<String, String> {
+) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    let res = tab.map.add_child(&parent_id, content)?;
-    Ok(res)
+    let new_id = tab.map.add_child(&parent_id, content)?;
+    tab.map.select_node(&new_id)?;
+    Ok(tab.map.clone())
 }
 
 #[tauri::command]
@@ -298,11 +299,12 @@ fn add_sibling(
     tab_id: String,
     node_id: String,
     content: String,
-) -> Result<String, String> {
+) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    let res = tab.map.add_sibling(&node_id, content)?;
-    Ok(res)
+    let new_id = tab.map.add_sibling(&node_id, content)?;
+    tab.map.select_node(&new_id)?;
+    Ok(tab.map.clone())
 }
 
 #[tauri::command]
@@ -311,34 +313,35 @@ fn change_node(
     tab_id: String,
     node_id: String,
     content: String,
-) -> Result<(), String> {
+) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
     tab.map.change_node(&node_id, content)?;
-    Ok(())
+    Ok(tab.map.clone())
 }
 
 #[tauri::command]
-fn remove_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<(), String> {
+fn remove_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
     tab.map.remove_node(&node_id)?;
-    Ok(())
+    Ok(tab.map.clone())
 }
 
 #[tauri::command]
-fn navigate(state: State<AppState>, tab_id: String, direction: Navigation) -> Result<(), String> {
+fn navigate(state: State<AppState>, tab_id: String, direction: Navigation) -> Result<String, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
     tab.map.navigate(direction);
-    Ok(())
+    Ok(tab.map.selected_node_id.clone())
 }
 
 #[tauri::command]
-fn select_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<(), String> {
+fn select_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<String, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.select_node(&node_id)
+    tab.map.select_node(&node_id)?;
+    Ok(tab.map.selected_node_id.clone())
 }
 
 #[tauri::command]
@@ -348,19 +351,18 @@ fn save_map(
     tab_id: String,
     path: Option<String>,
 ) -> Result<String, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-
-    let target_path = if let Some(p) = path {
-        tab.file_path = Some(p.clone());
-        p
-    } else if let Some(p) = &tab.file_path {
-        p.clone()
-    } else {
-        return Err("No path specified and no current path defined".to_string());
+    let (map, target_path) = {
+        let tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
+        let tab = tabs.get(&tab_id).ok_or("Tab not found")?;
+        let target_path = if let Some(p) = path {
+            p
+        } else if let Some(p) = &tab.file_path {
+            p.clone()
+        } else {
+            return Err("No path specified and no current path defined".to_string());
+        };
+        (tab.map.clone(), target_path)
     };
-
-    let map = tab.map.clone();
 
     let path_obj = Path::new(&target_path);
     let ext = path_obj
@@ -397,6 +399,14 @@ fn save_map(
         }
     }
 
+    {
+        let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
+        let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
+        if tab.file_path.as_deref() != Some(target_path.as_str()) {
+            tab.file_path = Some(target_path.clone());
+        }
+    }
+
     update_recent_files(&app, &state, &target_path)?;
     Ok(target_path)
 }
@@ -407,7 +417,7 @@ fn load_map(
     state: State<AppState>,
     tab_id: String,
     path: String,
-) -> Result<(), String> {
+) -> Result<MindMap, String> {
     let path_obj = Path::new(&path);
     let ext = path_obj
         .extension()
@@ -460,29 +470,41 @@ fn load_map(
         }
     };
 
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map = new_map;
-    tab.file_path = Some(path.clone());
+    let updated_map = {
+        let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
+        let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
+        tab.map = new_map;
+        tab.file_path = Some(path.clone());
+        tab.map.clone()
+    };
 
     update_recent_files(&app, &state, &path)?;
-    Ok(())
+    Ok(updated_map)
 }
 
 #[tauri::command]
-fn add_icon(state: State<AppState>, tab_id: String, node_id: String, icon: String) -> Result<(), String> {
+fn add_icon(
+    state: State<AppState>,
+    tab_id: String,
+    node_id: String,
+    icon: String,
+) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
     tab.map.add_icon(&node_id, icon)?;
-    Ok(())
+    Ok(tab.map.clone())
 }
 
 #[tauri::command]
-fn remove_last_icon(state: State<AppState>, tab_id: String, node_id: String) -> Result<(), String> {
+fn remove_last_icon(
+    state: State<AppState>,
+    tab_id: String,
+    node_id: String,
+) -> Result<MindMap, String> {
     let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
     let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
     tab.map.remove_last_icon(&node_id)?;
-    Ok(())
+    Ok(tab.map.clone())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

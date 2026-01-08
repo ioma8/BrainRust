@@ -146,10 +146,10 @@ export function App() {
     return stored === "dark" || stored === "light" ? stored : "light";
   });
 
-  const tabsRef = useRef<TabState[]>([]);
-  const activeTabIdRef = useRef<string | null>(null);
-  const mindMapRef = useRef<MindMap | null>(null);
-  const offsetRef = useRef({ x: 0, y: 0 });
+  const stateRef = useRef<{ tabs: TabState[]; activeTabId: string | null }>({
+    tabs: [],
+    activeTabId: null
+  });
   const viewportRef = useRef({ width: 0, height: 0 });
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -164,12 +164,15 @@ export function App() {
   const isEditingRef = useRef(false);
 
   useEffect(() => {
-    tabsRef.current = tabs;
-  }, [tabs]);
+    stateRef.current = { tabs, activeTabId };
+  }, [tabs, activeTabId]);
 
   useEffect(() => {
-    activeTabIdRef.current = activeTabId;
-  }, [activeTabId]);
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    if (activeTab?.map) {
+      renderCanvas(activeTab.map, activeTab.offset);
+    }
+  }, [tabs, activeTabId]);
 
   useEffect(() => {
     isEditingRef.current = isEditing;
@@ -178,9 +181,13 @@ export function App() {
   const iconButtons = useMemo(() => iconKeys.filter((key) => key !== "trash"), []);
 
   function getActiveTab(): TabState | null {
-    const currentId = activeTabIdRef.current;
+    const currentId = stateRef.current.activeTabId;
     if (!currentId) return null;
-    return tabsRef.current.find((tab) => tab.id === currentId) || null;
+    return stateRef.current.tabs.find((tab) => tab.id === currentId) || null;
+  }
+
+  function getTabById(tabId: string): TabState | null {
+    return stateRef.current.tabs.find((tab) => tab.id === tabId) || null;
   }
 
   function getCssVar(name: string, fallback: string) {
@@ -227,13 +234,19 @@ export function App() {
     }
   }
 
-  function renderCanvas() {
-    const map = mindMapRef.current;
+  function renderCanvas(mapOverride?: MindMap | null, offsetOverride?: { x: number; y: number }) {
+    const activeTab = getActiveTab();
+    const map = mapOverride ?? activeTab?.map ?? null;
+    const offset = offsetOverride ?? activeTab?.offset ?? null;
     const ctx = ctxRef.current;
-    if (!map || !ctx) return;
+    if (!map || !offset || !ctx) return;
 
-    const { width, height } = viewportRef.current;
-    if (width <= 0 || height <= 0) return;
+    let { width, height } = viewportRef.current;
+    if (width <= 0 || height <= 0) {
+      resizeCanvas();
+      ({ width, height } = viewportRef.current);
+      if (width <= 0 || height <= 0) return;
+    }
 
     const colors = themeColorsRef.current;
     ctx.fillStyle = colors.canvasBg;
@@ -255,11 +268,11 @@ export function App() {
         const pH = NODE_HEIGHT;
         const cH = NODE_HEIGHT;
 
-        const pCx = parent.x + offsetRef.current.x + pW;
-        const pCy = parent.y + offsetRef.current.y + pH / 2;
+        const pCx = parent.x + offset.x + pW;
+        const pCy = parent.y + offset.y + pH / 2;
 
-        const cCx = node.x + offsetRef.current.x;
-        const cCy = node.y + offsetRef.current.y + cH / 2;
+        const cCx = node.x + offset.x;
+        const cCy = node.y + offset.y + cH / 2;
 
         const dx = cCx - pCx;
         const trunk = clamp(Math.abs(dx) * 0.45, 30, 120);
@@ -275,7 +288,7 @@ export function App() {
 
     Object.values(map.nodes).forEach((node) => {
       const isSelected = node.id === map.selected_node_id;
-      drawNode(node, isSelected);
+      drawNode(node, isSelected, offset);
     });
   }
 
@@ -304,18 +317,6 @@ export function App() {
   function defaultOffset() {
     const viewport = getViewportSize();
     return { x: viewport.width / 2, y: viewport.height / 2 };
-  }
-
-  function syncActiveTabState() {
-    const activeId = activeTabIdRef.current;
-    if (!activeId) return;
-    const map = mindMapRef.current;
-    const offset = offsetRef.current;
-    setTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === activeId ? { ...tab, map, offset: { ...offset } } : tab
-      )
-    );
   }
 
   async function markDirty() {
@@ -357,14 +358,13 @@ export function App() {
     ctx.closePath();
   }
 
-  function drawNode(node: Node, isSelected: boolean) {
+  function drawNode(node: Node, isSelected: boolean, offset: { x: number; y: number }) {
     const ctx = ctxRef.current;
-    const map = mindMapRef.current;
-    if (!ctx || !map) return;
+    if (!ctx) return;
     const w = getNodeWidth(node);
     const h = NODE_HEIGHT;
-    const x = node.x + offsetRef.current.x;
-    const y = node.y + offsetRef.current.y;
+    const x = node.x + offset.x;
+    const y = node.y + offset.y;
     const colors = themeColorsRef.current;
 
     ctx.fillStyle = isSelected ? colors.nodeSelected : colors.node;
@@ -400,31 +400,41 @@ export function App() {
     ctx.fillText(node.content, currentX, y + h / 2);
   }
 
-  function computeLayout() {
-    const map = mindMapRef.current;
-    if (!map) return;
-    const rootId = map.root_id;
+  function cloneMap(map: MindMap): MindMap {
+    const nodes: Record<string, Node> = {};
+    Object.entries(map.nodes).forEach(([id, node]) => {
+      nodes[id] = {
+        ...node,
+        children: [...node.children],
+        icons: [...node.icons]
+      };
+    });
+    return { ...map, nodes };
+  }
+
+  function computeLayout(map: MindMap): MindMap {
+    const nextMap = cloneMap(map);
+    const rootId = nextMap.root_id;
     const prevRoot = map.nodes[rootId];
     const prevX = prevRoot?.x ?? 0;
     const prevY = prevRoot?.y ?? 0;
 
-    layoutNode(rootId, 0, 0);
+    layoutNode(nextMap, rootId, 0, 0);
 
-    const nextRoot = map.nodes[rootId];
-    if (!nextRoot) return;
+    const nextRoot = nextMap.nodes[rootId];
+    if (!nextRoot) return nextMap;
     const dx = prevX - nextRoot.x;
     const dy = prevY - nextRoot.y;
     if (dx !== 0 || dy !== 0) {
-      Object.values(map.nodes).forEach((node) => {
+      Object.values(nextMap.nodes).forEach((node) => {
         node.x += dx;
         node.y += dy;
       });
     }
+    return nextMap;
   }
 
-  function layoutNode(nodeId: string, x: number, startY: number): number {
-    const map = mindMapRef.current;
-    if (!map) return NODE_HEIGHT + V_GAP;
+  function layoutNode(map: MindMap, nodeId: string, x: number, startY: number): number {
     const node = map.nodes[nodeId];
     if (!node) return NODE_HEIGHT + V_GAP;
 
@@ -443,7 +453,7 @@ export function App() {
     let currentY = startY;
     for (const childId of children) {
       if (!map.nodes[childId]) continue;
-      const h = layoutNode(childId, childX, currentY);
+      const h = layoutNode(map, childId, childX, currentY);
       currentY += h;
     }
 
@@ -453,11 +463,9 @@ export function App() {
     return totalH;
   }
 
-  function fitView() {
-    const map = mindMapRef.current;
-    if (!map) return;
+  function computeFitOffset(map: MindMap) {
     const nodes = Object.values(map.nodes);
-    if (nodes.length === 0) return;
+    if (nodes.length === 0) return defaultOffset();
 
     let minX = Infinity;
     let minY = Infinity;
@@ -480,16 +488,14 @@ export function App() {
     const cy = minY + bboxH / 2;
     const viewport = getViewportSize();
 
-    offsetRef.current = {
+    return {
       x: viewport.width / 2 - cx,
       y: viewport.height / 2 - cy
     };
-
-    renderCanvas();
   }
 
-  function screenToWorld(x: number, y: number) {
-    return { x: x - offsetRef.current.x, y: y - offsetRef.current.y };
+  function screenToWorld(x: number, y: number, offset: { x: number; y: number }) {
+    return { x: x - offset.x, y: y - offset.y };
   }
 
   function getCanvasPoint(clientX: number, clientY: number) {
@@ -499,12 +505,15 @@ export function App() {
     return { x: clientX - rect.left, y: clientY - rect.top, rect };
   }
 
-  function getNodeAt(clientX: number, clientY: number): Node | null {
-    const map = mindMapRef.current;
-    if (!map) return null;
+  function getNodeAt(
+    map: MindMap,
+    offset: { x: number; y: number },
+    clientX: number,
+    clientY: number
+  ): Node | null {
     const point = getCanvasPoint(clientX, clientY);
     if (!point) return null;
-    const p = screenToWorld(point.x, point.y);
+    const p = screenToWorld(point.x, point.y, offset);
     for (const node of Object.values(map.nodes)) {
       const w = getNodeWidth(node);
       const h = NODE_HEIGHT;
@@ -515,17 +524,19 @@ export function App() {
     return null;
   }
 
-  function ensureVisible(nodeId: string) {
-    const map = mindMapRef.current;
-    if (!map) return;
+  function ensureVisible(
+    map: MindMap,
+    offset: { x: number; y: number },
+    nodeId: string
+  ) {
     const node = map.nodes[nodeId];
-    if (!node) return;
+    if (!node) return offset;
 
     const w = getNodeWidth(node);
     const h = NODE_HEIGHT;
 
-    const screenX = node.x + offsetRef.current.x;
-    const screenY = node.y + offsetRef.current.y;
+    const screenX = node.x + offset.x;
+    const screenY = node.y + offset.y;
     const padding = 50;
     const viewport = getViewportSize();
 
@@ -537,30 +548,54 @@ export function App() {
     if (screenX + w > viewport.width - padding) dx = viewport.width - padding - (screenX + w);
     if (screenY + h > viewport.height - padding) dy = viewport.height - padding - (screenY + h);
 
-    if (dx !== 0 || dy !== 0) {
-      offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
-      renderCanvas();
-    }
+    if (dx === 0 && dy === 0) return offset;
+    return { x: offset.x + dx, y: offset.y + dy };
+  }
+
+  function applyMapState(
+    tabId: string,
+    map: MindMap,
+    fit = false
+  ): { map: MindMap; offset: { x: number; y: number } } {
+    const tab = getTabById(tabId);
+    const laidOutMap = computeLayout(map);
+    const nextOffset = fit ? computeFitOffset(laidOutMap) : (tab?.offset ?? defaultOffset());
+    setTabs((prev) =>
+      prev.map((item) =>
+        item.id === tabId ? { ...item, map: laidOutMap, offset: nextOffset } : item
+      )
+    );
+    renderCanvas(laidOutMap, nextOffset);
+    return { map: laidOutMap, offset: nextOffset };
+  }
+
+  function applySelection(tabId: string, selectedId: string) {
+    const tab = getTabById(tabId);
+    if (!tab?.map) return;
+    const updatedMap = { ...tab.map, selected_node_id: selectedId };
+    setTabs((prev) =>
+      prev.map((item) => (item.id === tabId ? { ...item, map: updatedMap } : item))
+    );
+    renderCanvas(updatedMap, tab.offset);
+  }
+
+  function applyOffset(tabId: string, map: MindMap, offset: { x: number; y: number }) {
+    setTabs((prev) =>
+      prev.map((item) => (item.id === tabId ? { ...item, offset } : item))
+    );
+    renderCanvas(map, offset);
   }
 
   async function loadMapState(tabId: string, fit = false) {
     try {
       const map = await invoke<MindMap>("get_map", { tabId });
-      mindMapRef.current = map;
-      computeLayout();
-      if (fit) fitView();
-      const offset = { ...offsetRef.current };
-      setTabs((prev) =>
-        prev.map((tab) => (tab.id === tabId ? { ...tab, map, offset } : tab))
-      );
-      renderCanvas();
+      applyMapState(tabId, map, fit);
     } catch (e) {
       console.error("Failed to load map:", e);
     }
   }
 
   async function createNewTab() {
-    syncActiveTabState();
     const tabId = crypto.randomUUID();
     const tab: TabState = {
       id: tabId,
@@ -572,19 +607,16 @@ export function App() {
     };
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tabId);
-    activeTabIdRef.current = tabId;
-    offsetRef.current = { ...tab.offset };
 
     try {
       const map = await invoke<MindMap>("new_map", { tabId });
-      mindMapRef.current = map;
-      computeLayout();
-      fitView();
-      const offset = { ...offsetRef.current };
-      const updatedTab = { ...tab, map, offset };
+      const laidOutMap = computeLayout(map);
+      const offset = computeFitOffset(laidOutMap);
+      const updatedTab = { ...tab, map: laidOutMap, offset };
       setTabs((prev) =>
         prev.map((item) => (item.id === tabId ? updatedTab : item))
       );
+      renderCanvas(laidOutMap, offset);
       await updateTitle(updatedTab);
     } catch (e) {
       console.error(e);
@@ -592,7 +624,7 @@ export function App() {
   }
 
   async function closeTab(tabId: string) {
-    const currentTabs = tabsRef.current;
+    const currentTabs = stateRef.current.tabs;
     const tabIndex = currentTabs.findIndex((tab) => tab.id === tabId);
     if (tabIndex === -1) return;
     const tab = currentTabs[tabIndex];
@@ -602,10 +634,6 @@ export function App() {
         title: "Unsaved Changes"
       });
       if (!confirmed) return;
-    }
-
-    if (tabId === activeTabIdRef.current) {
-      syncActiveTabState();
     }
 
     try {
@@ -619,22 +647,16 @@ export function App() {
 
     if (nextTabs.length === 0) {
       setActiveTabId(null);
-      activeTabIdRef.current = null;
-      mindMapRef.current = null;
       await createNewTab();
       return;
     }
 
-    if (tabId === activeTabIdRef.current) {
+    if (tabId === stateRef.current.activeTabId) {
       const nextTab = nextTabs[tabIndex] || nextTabs[tabIndex - 1];
       if (nextTab) {
         setActiveTabId(nextTab.id);
-        activeTabIdRef.current = nextTab.id;
-        offsetRef.current = { ...nextTab.offset };
-        mindMapRef.current = nextTab.map;
         if (nextTab.map) {
-          computeLayout();
-          renderCanvas();
+          renderCanvas(nextTab.map, nextTab.offset);
         } else {
           await loadMapState(nextTab.id, true);
         }
@@ -646,17 +668,12 @@ export function App() {
   }
 
   function switchToTab(tabId: string) {
-    if (tabId === activeTabIdRef.current) return;
-    syncActiveTabState();
-    const tab = tabsRef.current.find((item) => item.id === tabId);
+    if (tabId === stateRef.current.activeTabId) return;
+    const tab = stateRef.current.tabs.find((item) => item.id === tabId);
     if (!tab) return;
     setActiveTabId(tabId);
-    activeTabIdRef.current = tabId;
-    offsetRef.current = { ...tab.offset };
-    mindMapRef.current = tab.map;
     if (tab.map) {
-      computeLayout();
-      renderCanvas();
+      renderCanvas(tab.map, tab.offset);
     } else {
       void loadMapState(tabId, true);
     }
@@ -664,8 +681,8 @@ export function App() {
   }
 
   function cycleTab(step: number) {
-    const currentTabs = tabsRef.current;
-    const currentId = activeTabIdRef.current;
+    const currentTabs = stateRef.current.tabs;
+    const currentId = stateRef.current.activeTabId;
     if (currentTabs.length < 2 || !currentId) return;
     const currentIndex = currentTabs.findIndex((tab) => tab.id === currentId);
     if (currentIndex === -1) return;
@@ -678,13 +695,12 @@ export function App() {
   }
 
   async function openMapPath(path: string) {
-    const existingTab = tabsRef.current.find((tab) => tab.filePath === path);
+    const existingTab = stateRef.current.tabs.find((tab) => tab.filePath === path);
     if (existingTab) {
       switchToTab(existingTab.id);
       return;
     }
 
-    syncActiveTabState();
     const tabId = crypto.randomUUID();
     const tab: TabState = {
       id: tabId,
@@ -696,14 +712,12 @@ export function App() {
     };
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tabId);
-    activeTabIdRef.current = tabId;
-    offsetRef.current = { ...tab.offset };
 
     try {
       await invoke("new_map", { tabId });
-      await invoke("load_map", { tabId, path });
-      await loadMapState(tabId, true);
-      const updatedTab = { ...tab, filePath: path, isDirty: false };
+      const map = await invoke<MindMap>("load_map", { tabId, path });
+      const { map: laidOutMap, offset } = applyMapState(tabId, map, true);
+      const updatedTab = { ...tab, filePath: path, isDirty: false, map: laidOutMap, offset };
       updateTabTitle(updatedTab);
       setTabs((prev) =>
         prev.map((item) => (item.id === tabId ? updatedTab : item))
@@ -774,48 +788,47 @@ export function App() {
 
   async function handleIconClick(key: string) {
     const tab = getActiveTab();
-    const map = mindMapRef.current;
-    if (!tab || !map) return;
-    const id = map.selected_node_id;
+    if (!tab?.map) return;
+    const id = tab.map.selected_node_id;
     try {
-      if (key === "trash") {
-        await invoke("remove_last_icon", { tabId: tab.id, nodeId: id });
-      } else {
-        await invoke("add_icon", { tabId: tab.id, nodeId: id, icon: key });
-      }
+      const updatedMap = key === "trash"
+        ? await invoke<MindMap>("remove_last_icon", { tabId: tab.id, nodeId: id })
+        : await invoke<MindMap>("add_icon", { tabId: tab.id, nodeId: id, icon: key });
       await markDirty();
-      await loadMapState(tab.id);
+      applyMapState(tab.id, updatedMap);
     } catch (e) {
       console.error(e);
     }
   }
 
-  function startEdit(x?: number, y?: number, w?: number, h?: number, content?: string) {
-    const map = mindMapRef.current;
-    if (!map) return;
-    const node = map.nodes[map.selected_node_id];
+  function openEditor(
+    map: MindMap,
+    offset: { x: number; y: number },
+    nodeId: string,
+    position?: { left: number; top: number; width: number; height: number; content?: string }
+  ) {
+    const node = map.nodes[nodeId];
     if (!node) return;
-
     const editor = editorRef.current;
     if (!editor) return;
 
-    let left = x;
-    let top = y;
-    let width = w;
-    let height = h;
+    let left = position?.left;
+    let top = position?.top;
+    let width = position?.width;
+    let height = position?.height;
 
     if (left === undefined || top === undefined) {
       const nodeW = getNodeWidth(node);
       const nodeH = NODE_HEIGHT;
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
-      left = rect.left + node.x + offsetRef.current.x;
-      top = rect.top + node.y + offsetRef.current.y;
+      left = rect.left + node.x + offset.x;
+      top = rect.top + node.y + offset.y;
       width = nodeW;
       height = nodeH;
     }
 
-    editor.value = content || node.content;
+    editor.value = position?.content ?? node.content;
     setEditorStyle({
       left: left ?? 0,
       top: top ?? 0,
@@ -829,20 +842,29 @@ export function App() {
     });
   }
 
-  async function finishEdit() {
-    const map = mindMapRef.current;
-    if (!map || !isEditingRef.current) return;
+  function startEdit() {
     const tab = getActiveTab();
+    if (!tab?.map) return;
+    openEditor(tab.map, tab.offset, tab.map.selected_node_id);
+  }
+
+  async function finishEdit() {
+    const tab = getActiveTab();
+    if (!tab?.map || !isEditingRef.current) return;
     const editor = editorRef.current;
     if (!tab || !editor) return;
     const content = editor.value;
-    const id = map.selected_node_id;
+    const id = tab.map.selected_node_id;
     try {
-      await invoke("change_node", { tabId: tab.id, nodeId: id, content });
+      const updatedMap = await invoke<MindMap>("change_node", {
+        tabId: tab.id,
+        nodeId: id,
+        content
+      });
       await markDirty();
       setIsEditing(false);
       setEditorStyle(null);
-      await loadMapState(tab.id);
+      applyMapState(tab.id, updatedMap);
     } catch (e) {
       console.error(e);
     }
@@ -859,18 +881,22 @@ export function App() {
   function handleMouseDown(event: MouseEvent) {
     const dragState = dragStateRef.current;
     dragState.dragStart = { x: event.clientX, y: event.clientY };
-    dragState.lastOffset = { ...offsetRef.current };
+    const activeTab = getActiveTab();
+    dragState.lastOffset = activeTab?.offset ? { ...activeTab.offset } : defaultOffset();
     dragState.isDragging = false;
 
-    const node = getNodeAt(event.clientX, event.clientY);
-    if (node) {
-      const tab = getActiveTab();
-      const map = mindMapRef.current;
-      if (tab && map && node.id !== map.selected_node_id) {
+    if (activeTab?.map) {
+      const node = getNodeAt(activeTab.map, activeTab.offset, event.clientX, event.clientY);
+      if (node && node.id !== activeTab.map.selected_node_id) {
         void (async () => {
-          await invoke("select_node", { tabId: tab.id, nodeId: node.id });
-          await loadMapState(tab.id);
+          const selectedId = await invoke<string>("select_node", {
+            tabId: activeTab.id,
+            nodeId: node.id
+          });
+          applySelection(activeTab.id, selectedId);
         })();
+      } else {
+        dragState.isDragging = true;
       }
     } else {
       dragState.isDragging = true;
@@ -880,13 +906,22 @@ export function App() {
   function handleMouseMove(event: MouseEvent) {
     const dragState = dragStateRef.current;
     if (dragState.isDragging) {
+      const activeTab = getActiveTab();
+      if (!activeTab) return;
       const dx = event.clientX - dragState.dragStart.x;
       const dy = event.clientY - dragState.dragStart.y;
-      offsetRef.current = {
+      const nextOffset = {
         x: dragState.lastOffset.x + dx,
         y: dragState.lastOffset.y + dy
       };
-      renderCanvas();
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === activeTab.id ? { ...tab, offset: nextOffset } : tab
+        )
+      );
+      if (activeTab.map) {
+        renderCanvas(activeTab.map, nextOffset);
+      }
     }
   }
 
@@ -895,15 +930,23 @@ export function App() {
   }
 
   function handleDoubleClick(event: MouseEvent) {
-    const node = getNodeAt(event.clientX, event.clientY);
+    const activeTab = getActiveTab();
+    if (!activeTab?.map) return;
+    const node = getNodeAt(activeTab.map, activeTab.offset, event.clientX, event.clientY);
     if (!node) return;
     const w = getNodeWidth(node);
     const h = NODE_HEIGHT;
     const point = getCanvasPoint(event.clientX, event.clientY);
     if (!point) return;
-    const canvasX = node.x + offsetRef.current.x;
-    const canvasY = node.y + offsetRef.current.y;
-    startEdit(point.rect.left + canvasX, point.rect.top + canvasY, w, h, node.content);
+    const canvasX = node.x + activeTab.offset.x;
+    const canvasY = node.y + activeTab.offset.y;
+    openEditor(activeTab.map, activeTab.offset, node.id, {
+      left: point.rect.left + canvasX,
+      top: point.rect.top + canvasY,
+      width: w,
+      height: h,
+      content: node.content
+    });
   }
 
   useEffect(() => {
@@ -966,45 +1009,49 @@ export function App() {
           break;
         case "add_child": {
           const tab = getActiveTab();
-          const map = mindMapRef.current;
-          if (tab && map) {
-            const newId = await invoke<string>("add_child", {
+          if (tab?.map) {
+            const updatedMap = await invoke<MindMap>("add_child", {
               tabId: tab.id,
-              parentId: map.selected_node_id,
+              parentId: tab.map.selected_node_id,
               content: "New Node"
             });
             await markDirty();
-            await invoke("select_node", { tabId: tab.id, nodeId: newId });
-            await loadMapState(tab.id);
-            ensureVisible(newId);
-            startEdit();
+            const { map: laidOutMap, offset } = applyMapState(tab.id, updatedMap);
+            const visibleOffset = ensureVisible(laidOutMap, offset, laidOutMap.selected_node_id);
+            if (visibleOffset.x !== offset.x || visibleOffset.y !== offset.y) {
+              applyOffset(tab.id, laidOutMap, visibleOffset);
+            }
+            openEditor(laidOutMap, visibleOffset, laidOutMap.selected_node_id);
           }
           break;
         }
         case "add_sibling": {
           const tab = getActiveTab();
-          const map = mindMapRef.current;
-          if (tab && map && map.selected_node_id !== map.root_id) {
-            const newId = await invoke<string>("add_sibling", {
+          if (tab?.map && tab.map.selected_node_id !== tab.map.root_id) {
+            const updatedMap = await invoke<MindMap>("add_sibling", {
               tabId: tab.id,
-              nodeId: map.selected_node_id,
+              nodeId: tab.map.selected_node_id,
               content: "New Node"
             });
             await markDirty();
-            await invoke("select_node", { tabId: tab.id, nodeId: newId });
-            await loadMapState(tab.id);
-            ensureVisible(newId);
-            startEdit();
+            const { map: laidOutMap, offset } = applyMapState(tab.id, updatedMap);
+            const visibleOffset = ensureVisible(laidOutMap, offset, laidOutMap.selected_node_id);
+            if (visibleOffset.x !== offset.x || visibleOffset.y !== offset.y) {
+              applyOffset(tab.id, laidOutMap, visibleOffset);
+            }
+            openEditor(laidOutMap, visibleOffset, laidOutMap.selected_node_id);
           }
           break;
         }
         case "delete_node": {
           const tab = getActiveTab();
-          const map = mindMapRef.current;
-          if (tab && map && map.selected_node_id !== map.root_id) {
-            await invoke("remove_node", { tabId: tab.id, nodeId: map.selected_node_id });
+          if (tab?.map && tab.map.selected_node_id !== tab.map.root_id) {
+            const updatedMap = await invoke<MindMap>("remove_node", {
+              tabId: tab.id,
+              nodeId: tab.map.selected_node_id
+            });
             await markDirty();
-            await loadMapState(tab.id);
+            applyMapState(tab.id, updatedMap);
           }
           break;
         }
@@ -1039,7 +1086,7 @@ export function App() {
   useEffect(() => {
     let unlistenClose: (() => void) | undefined;
     appWindow.onCloseRequested(async (event) => {
-      const hasDirtyTabs = tabsRef.current.some((tab) => tab.isDirty);
+      const hasDirtyTabs = stateRef.current.tabs.some((tab) => tab.isDirty);
       if (hasDirtyTabs) {
         event.preventDefault();
         const confirmed = await confirm(
@@ -1071,7 +1118,7 @@ export function App() {
       }
       if (isAccel && key === "w") {
         event.preventDefault();
-        const currentId = activeTabIdRef.current;
+        const currentId = stateRef.current.activeTabId;
         if (currentId) await closeTab(currentId);
         return;
       }
@@ -1094,71 +1141,82 @@ export function App() {
       const tab = getActiveTab();
       if (!tab) return;
       let moved = false;
+      let selectedId = "";
       if (event.key === "ArrowRight") {
-        await invoke("navigate", { tabId: tab.id, direction: "Right" });
+        selectedId = await invoke<string>("navigate", { tabId: tab.id, direction: "Right" });
         moved = true;
       }
       if (event.key === "ArrowLeft") {
-        await invoke("navigate", { tabId: tab.id, direction: "Left" });
+        selectedId = await invoke<string>("navigate", { tabId: tab.id, direction: "Left" });
         moved = true;
       }
       if (event.key === "ArrowDown") {
-        await invoke("navigate", { tabId: tab.id, direction: "Down" });
+        selectedId = await invoke<string>("navigate", { tabId: tab.id, direction: "Down" });
         moved = true;
       }
       if (event.key === "ArrowUp") {
-        await invoke("navigate", { tabId: tab.id, direction: "Up" });
+        selectedId = await invoke<string>("navigate", { tabId: tab.id, direction: "Up" });
         moved = true;
       }
 
       if (moved) {
-        await loadMapState(tab.id);
-        const map = mindMapRef.current;
-        if (map) ensureVisible(map.selected_node_id);
+        if (selectedId) {
+          const nextMap = tab.map ? { ...tab.map, selected_node_id: selectedId } : null;
+          applySelection(tab.id, selectedId);
+          if (nextMap) {
+            const visibleOffset = ensureVisible(nextMap, tab.offset, selectedId);
+            if (visibleOffset.x !== tab.offset.x || visibleOffset.y !== tab.offset.y) {
+              applyOffset(tab.id, nextMap, visibleOffset);
+            }
+          }
+        }
         return;
       }
 
       if (event.key === "Enter" || event.key === "Insert") {
-        const map = mindMapRef.current;
-        if (!map) return;
-        let newId = "";
+        if (!tab.map) return;
+        let updatedMap: MindMap | null = null;
         if (event.key === "Insert") {
-          newId = await invoke("add_child", {
+          updatedMap = await invoke<MindMap>("add_child", {
             tabId: tab.id,
-            parentId: map.selected_node_id,
+            parentId: tab.map.selected_node_id,
             content: "New Node"
           });
         } else {
-          if (map.selected_node_id === map.root_id) {
-            newId = await invoke("add_child", {
+          if (tab.map.selected_node_id === tab.map.root_id) {
+            updatedMap = await invoke<MindMap>("add_child", {
               tabId: tab.id,
-              parentId: map.selected_node_id,
+              parentId: tab.map.selected_node_id,
               content: "New Node"
             });
           } else {
-            newId = await invoke("add_sibling", {
+            updatedMap = await invoke<MindMap>("add_sibling", {
               tabId: tab.id,
-              nodeId: map.selected_node_id,
+              nodeId: tab.map.selected_node_id,
               content: "New Node"
             });
           }
         }
-        if (newId) {
+        if (updatedMap) {
           await markDirty();
-          await invoke("select_node", { tabId: tab.id, nodeId: newId });
-          await loadMapState(tab.id);
-          ensureVisible(newId);
-          startEdit();
+          const { map: laidOutMap, offset } = applyMapState(tab.id, updatedMap);
+          const visibleOffset = ensureVisible(laidOutMap, offset, laidOutMap.selected_node_id);
+          if (visibleOffset.x !== offset.x || visibleOffset.y !== offset.y) {
+            applyOffset(tab.id, laidOutMap, visibleOffset);
+          }
+          openEditor(laidOutMap, visibleOffset, laidOutMap.selected_node_id);
         }
         return;
       }
 
       if (event.key === "Delete") {
-        const map = mindMapRef.current;
-        if (map && map.selected_node_id !== map.root_id) {
-          await invoke("remove_node", { tabId: tab.id, nodeId: map.selected_node_id });
+        if (tab.map && tab.map.selected_node_id !== tab.map.root_id) {
+          const updatedMap = await invoke<MindMap>("remove_node", {
+            tabId: tab.id,
+            nodeId: tab.map.selected_node_id
+          });
           await markDirty();
-          await loadMapState(tab.id);
+          applyMapState(tab.id, updatedMap);
         }
       } else if (event.key === "F2") {
         startEdit();
