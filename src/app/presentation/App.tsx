@@ -4,8 +4,6 @@ import { NODE_HEIGHT } from "../domain/values/layout";
 import { iconKeys } from "./constants/icons";
 import { openFilters, saveFilters } from "./constants/fileDialogs";
 import { NODE_FONT_LOAD } from "./constants/typography";
-import { computeLayout } from "../domain/layout/layout";
-import { computeFitOffset, ensureVisible } from "../domain/layout/viewport";
 import {
   defaultThemeColors,
   loadTheme,
@@ -15,12 +13,8 @@ import {
   type ThemeColors
 } from "./theme/theme";
 import {
-  addTab as addTabState,
-  closeTab as closeTabState,
   getActiveTab as getActiveTabState,
   getTabById as getTabByIdState,
-  markTabDirty as markTabDirtyState,
-  setActiveTab as setActiveTabState,
   updateTab as updateTabState,
   type AppState,
   type TabState
@@ -34,12 +28,14 @@ import { dialog } from "../infrastructure/tauri/dialogApi";
 import { events } from "../infrastructure/tauri/eventApi";
 import * as mindmapApi from "../infrastructure/tauri/mindmapApi";
 import { appWindow } from "../infrastructure/tauri/windowApi";
+import { addNode as addNodeUsecase, changeNode as changeNodeUsecase, removeSelectedNode as removeSelectedNodeUsecase, updateIcon as updateIconUsecase } from "../application/usecases/nodes";
+import { navigateSelection as navigateSelectionUsecase, selectNode as selectNodeUsecase } from "../application/usecases/selection";
+import { openFromDialog as openFromDialogUsecase, saveMap as saveMapUsecase } from "../application/usecases/files";
+import { closeTab as closeTabUsecase, createNewTab as createNewTabUsecase, openMapPath as openMapPathUsecase, switchToTab as switchToTabUsecase } from "../application/usecases/tabs";
+import { confirmCloseApp } from "../application/usecases/appClose";
+import type { UsecaseResult } from "../application/usecases/result";
 
 
-
-function fileNameFromPath(path: string) {
-  return path.split(/[\\/]/).pop() || path;
-}
 
 export function App() {
   const [appState, setAppState] = useState<AppState>({
@@ -70,6 +66,17 @@ export function App() {
     renderCanvas,
     resizeCanvas
   } = useCanvasRenderer(themeColorsRef);
+  const deps = useMemo(() => ({
+    id: { nextId: () => crypto.randomUUID() },
+    layout: { getLayoutConfig, getViewport: getViewportSize },
+    mindmap: mindmapApi,
+    dialog,
+    window: {
+      setTitle: (title: string) => appWindow.setTitle(title),
+      close: () => appWindow.close(),
+      destroy: () => appWindow.destroy()
+    }
+  }), [getLayoutConfig, getViewportSize]);
 
   useEffect(() => {
     stateRef.current = appState;
@@ -92,10 +99,6 @@ export function App() {
     return getActiveTabState(stateRef.current);
   }
 
-  function getTabById(tabId: string): TabState | null {
-    return getTabByIdState(stateRef.current, tabId);
-  }
-
   function updateThemeColors() {
     themeColorsRef.current = resolveThemeColors();
   }
@@ -114,17 +117,6 @@ export function App() {
     }
   }
 
-  async function updateTitle(tabOverride?: TabState | null) {
-    const tab = tabOverride ?? getActiveTab();
-    let title = tab?.title || "BrainRust";
-    if (tab?.isDirty) title += "*";
-    try {
-      await appWindow.setTitle(title);
-    } catch (e) {
-      console.error("Failed to set title", e);
-    }
-  }
-
   function renderActiveTab() {
     const tab = getActiveTab();
     if (!tab?.map) return;
@@ -140,164 +132,43 @@ export function App() {
     setAppState((prev) => updater(prev));
   }
 
-  async function markDirty() {
-    const tab = getActiveTab();
-    if (!tab || tab.isDirty) return;
-    updateAppState((state) => markTabDirtyState(state, tab.id));
-    await updateTitle();
-  }
-
-  function withUpdatedTitle(tab: TabState): TabState {
-    if (!tab.filePath) return tab;
-    return { ...tab, title: fileNameFromPath(tab.filePath) };
-  }
-
-
-  function applyMapState(
-    tabId: string,
-    map: MindMap,
-    fit = false
-  ): { map: MindMap; offset: { x: number; y: number } } {
-    const tab = getTabById(tabId);
-    const layoutConfig = getLayoutConfig();
-    const laidOutMap = computeLayout(map, layoutConfig);
-    const viewport = getViewportSize();
-    const nextOffset = fit
-      ? computeFitOffset(laidOutMap, viewport, layoutConfig)
-      : (tab?.offset ?? defaultOffset());
-    updateAppState((state) => updateTabState(state, tabId, { map: laidOutMap, offset: nextOffset }));
-    renderCanvas(laidOutMap, nextOffset);
-    return { map: laidOutMap, offset: nextOffset };
-  }
-
-  function applySelection(tabId: string, selectedId: string) {
-    const tab = getTabById(tabId);
-    if (!tab?.map) return;
-    const updatedMap = { ...tab.map, selected_node_id: selectedId };
-    updateAppState((state) => updateTabState(state, tabId, { map: updatedMap }));
-    renderCanvas(updatedMap, tab.offset);
-  }
-
-  function applyOffset(tabId: string, map: MindMap, offset: { x: number; y: number }) {
-    updateAppState((state) => updateTabState(state, tabId, { offset }));
-    renderCanvas(map, offset);
-  }
-
-  function ensureVisibleOffset(map: MindMap, offset: { x: number; y: number }, nodeId: string) {
-    const viewport = getViewportSize();
-    return ensureVisible(map, offset, nodeId, viewport, getLayoutConfig());
-  }
-
-  async function loadMapState(tabId: string, fit = false) {
-    try {
-      const map = await mindmapApi.getMap(tabId);
-      applyMapState(tabId, map, fit);
-    } catch (e) {
-      console.error("Failed to load map:", e);
+  function applyResult(result: UsecaseResult) {
+    updateAppState(() => result.state);
+    if (result.render) {
+      renderCanvas(result.render.map, result.render.offset);
     }
-  }
-
-  function buildTab(tabId: string, title: string, filePath: string | null): TabState {
-    return {
-      id: tabId,
-      title,
-      filePath,
-      isDirty: false,
-      map: null,
-      offset: defaultOffset()
-    };
-  }
-
-  function addTabAndSelect(tab: TabState) {
-    updateAppState((state) => addTabState(state, tab, true));
-  }
-
-  function replaceTab(updatedTab: TabState) {
-    updateAppState((state) => updateTabState(state, updatedTab.id, updatedTab));
-  }
-
-  async function initializeNewTab(tab: TabState) {
-    const map = await mindmapApi.newMap(tab.id);
-    const layoutConfig = getLayoutConfig();
-    const laidOutMap = computeLayout(map, layoutConfig);
-    const offset = computeFitOffset(laidOutMap, getViewportSize(), layoutConfig);
-    const updatedTab = { ...tab, map: laidOutMap, offset };
-    replaceTab(updatedTab);
-    renderCanvas(laidOutMap, offset);
-    await updateTitle(updatedTab);
   }
 
   async function createNewTab() {
-    const tabId = crypto.randomUUID();
-    const tab = buildTab(tabId, `Untitled ${untitledCounterRef.current++}`, null);
-    addTabAndSelect(tab);
     try {
-      await initializeNewTab(tab);
+      const title = `Untitled ${untitledCounterRef.current++}`;
+      const result = await createNewTabUsecase(stateRef.current, deps, title);
+      applyResult(result);
     } catch (e) {
       console.error(e);
     }
-  }
-
-  async function confirmCloseTab(tab: TabState): Promise<boolean> {
-    if (!tab.isDirty) return true;
-    return dialog.confirm("You have unsaved changes. Close this tab?", {
-      kind: "warning",
-      title: "Unsaved Changes"
-    });
-  }
-
-  async function closeTabBackend(tabId: string) {
-    try {
-      await mindmapApi.closeTab(tabId);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  function pickNextTab(tabs: TabState[], closedIndex: number): TabState | null {
-    return tabs[closedIndex] || tabs[closedIndex - 1] || null;
-  }
-
-  async function activateTab(tab: TabState, fit = false) {
-    updateAppState((state) => setActiveTabState(state, tab.id));
-    if (tab.map) {
-      renderCanvas(tab.map, tab.offset);
-    } else {
-      await loadMapState(tab.id, fit);
-    }
-    await updateTitle(tab);
   }
 
   async function closeTab(tabId: string) {
-    const currentState = stateRef.current;
-    const tabIndex = currentState.tabs.findIndex((tab) => tab.id === tabId);
-    if (tabIndex === -1) return;
-    const tab = currentState.tabs[tabIndex];
-    const confirmed = await confirmCloseTab(tab);
-    if (!confirmed) return;
-    await closeTabBackend(tabId);
-
-    const nextState = closeTabState(currentState, tabId).state;
-    updateAppState(() => nextState);
-
-    if (nextState.tabs.length === 0) {
-      await createNewTab();
-      return;
-    }
-
-    if (tabId === currentState.activeTabId) {
-      const nextTab = pickNextTab(nextState.tabs, tabIndex);
-      if (nextTab) await activateTab(nextTab, true);
-    } else {
-      await updateTitle();
+    try {
+      const willCloseLast = stateRef.current.tabs.length === 1;
+      const fallbackTitle = willCloseLast
+        ? `Untitled ${untitledCounterRef.current++}`
+        : `Untitled ${untitledCounterRef.current}`;
+      const result = await closeTabUsecase(stateRef.current, deps, tabId, fallbackTitle);
+      applyResult(result);
+    } catch (e) {
+      console.error(e);
     }
   }
 
   async function switchToTab(tabId: string) {
-    if (tabId === stateRef.current.activeTabId) return;
-    const tab = stateRef.current.tabs.find((item) => item.id === tabId);
-    if (!tab) return;
-    await activateTab(tab, true);
+    try {
+      const result = await switchToTabUsecase(stateRef.current, deps, tabId, true);
+      applyResult(result);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   function cycleTab(step: number) {
@@ -315,23 +186,9 @@ export function App() {
   }
 
   async function openMapPath(path: string) {
-    const existingTab = stateRef.current.tabs.find((tab) => tab.filePath === path);
-    if (existingTab) {
-      await switchToTab(existingTab.id);
-      return;
-    }
-
-    const tabId = crypto.randomUUID();
-    const tab = buildTab(tabId, fileNameFromPath(path), path);
-    addTabAndSelect(tab);
-
     try {
-      await mindmapApi.newMap(tabId);
-      const map = await mindmapApi.loadMap(tabId, path);
-      const { map: laidOutMap, offset } = applyMapState(tabId, map, true);
-      const updatedTab = withUpdatedTitle({ ...tab, filePath: path, isDirty: false, map: laidOutMap, offset });
-      replaceTab(updatedTab);
-      await updateTitle(updatedTab);
+      const result = await openMapPathUsecase(stateRef.current, deps, path);
+      applyResult(result);
     } catch (e) {
       console.error(e);
     }
@@ -339,41 +196,19 @@ export function App() {
 
   async function openMap() {
     try {
-      const path = await dialog.open({
-        multiple: false,
-        directory: false,
-        filters: openFilters
-      });
-
-      if (typeof path === "string") {
-        await openMapPath(path);
-      }
+      const result = await openFromDialogUsecase(stateRef.current, deps, openFilters);
+      applyResult(result);
     } catch (e) {
       console.error(e);
     }
-  }
-
-  async function pickSavePath(tab: TabState, saveAs: boolean) {
-    if (!saveAs && tab.filePath) return tab.filePath;
-    return dialog.save({
-      filters: saveFilters,
-      defaultPath: tab.filePath || undefined
-    });
-  }
-
-  async function persistTabMap(tab: TabState, path: string) {
-    const savedPath = await mindmapApi.saveMap(tab.id, path);
-    const updatedTab = withUpdatedTitle({ ...tab, filePath: savedPath, isDirty: false });
-    replaceTab(updatedTab);
-    await updateTitle(updatedTab);
   }
 
   async function saveMap(saveAs = false) {
     const tab = getActiveTab();
     if (!tab) return;
     try {
-      const path = await pickSavePath(tab, saveAs);
-      if (path) await persistTabMap(tab, path);
+      const result = await saveMapUsecase(stateRef.current, deps, tab.id, saveAs, saveFilters);
+      applyResult(result);
     } catch (e) {
       console.error("Save failed:", e);
     }
@@ -382,13 +217,9 @@ export function App() {
   async function handleIconClick(key: string) {
     const tab = getActiveTab();
     if (!tab?.map) return;
-    const id = tab.map.selected_node_id;
     try {
-      const updatedMap = key === "trash"
-        ? await mindmapApi.removeLastIcon(tab.id, id)
-        : await mindmapApi.addIcon(tab.id, id, key);
-      await markDirty();
-      applyMapState(tab.id, updatedMap);
+      const result = await updateIconUsecase(stateRef.current, deps, tab.id, key);
+      applyResult(result);
     } catch (e) {
       console.error(e);
     }
@@ -450,11 +281,10 @@ export function App() {
     const content = editor.value;
     const id = tab.map.selected_node_id;
     try {
-      const updatedMap = await mindmapApi.changeNode(tab.id, id, content);
-      await markDirty();
+      const result = await changeNodeUsecase(stateRef.current, deps, tab.id, id, content);
       setIsEditing(false);
       setEditorStyle(null);
-      applyMapState(tab.id, updatedMap);
+      applyResult(result);
     } catch (e) {
       console.error(e);
     }
@@ -469,8 +299,8 @@ export function App() {
   }
 
   async function selectNode(tab: TabState, nodeId: string) {
-    const selectedId = await mindmapApi.selectNode(tab.id, nodeId);
-    applySelection(tab.id, selectedId);
+    const result = await selectNodeUsecase(stateRef.current, deps, tab.id, nodeId);
+    applyResult(result);
   }
 
   function handleMouseDown(event: MouseEvent) {
@@ -631,15 +461,11 @@ export function App() {
     let unlistenClose: (() => void) | undefined;
     appWindow.onCloseRequested(async (event) => {
       const hasDirtyTabs = stateRef.current.tabs.some((tab) => tab.isDirty);
-      if (hasDirtyTabs) {
-        event.preventDefault();
-        const confirmed = await dialog.confirm(
-          "You have unsaved changes. Are you sure you want to exit?",
-          { kind: "warning", title: "Unsaved Changes" }
-        );
-        if (confirmed) {
-          await appWindow.destroy();
-        }
+      if (!hasDirtyTabs) return;
+      event.preventDefault();
+      const confirmed = await confirmCloseApp(stateRef.current, deps);
+      if (confirmed) {
+        await appWindow.destroy();
       }
     }).then((fn) => {
       unlistenClose = fn;
@@ -686,15 +512,9 @@ export function App() {
   }
 
   async function navigateSelection(tab: TabState, direction: string) {
-    const selectedId = await mindmapApi.navigate(tab.id, direction);
-    if (!selectedId || !tab.map) return true;
-    const nextMap = { ...tab.map, selected_node_id: selectedId };
-    applySelection(tab.id, selectedId);
-    const visibleOffset = ensureVisibleOffset(nextMap, tab.offset, selectedId);
-    if (visibleOffset.x !== tab.offset.x || visibleOffset.y !== tab.offset.y) {
-      applyOffset(tab.id, nextMap, visibleOffset);
-    }
-    return true;
+    const result = await navigateSelectionUsecase(stateRef.current, deps, tab.id, direction);
+    applyResult(result);
+    return Boolean(result.render);
   }
 
   async function handleNavigationKeys(event: KeyboardEvent, tab: TabState) {
@@ -704,34 +524,18 @@ export function App() {
     return navigateSelection(tab, direction);
   }
 
-  async function addNode(tab: TabState, mode: "child" | "sibling") {
-    if (!tab.map) return null;
-    if (mode === "sibling" && tab.map.selected_node_id === tab.map.root_id) {
-      mode = "child";
-    }
-    if (mode === "child") {
-      return mindmapApi.addChild(tab.id, tab.map.selected_node_id, "New Node");
-    }
-    return mindmapApi.addSibling(tab.id, tab.map.selected_node_id, "New Node");
-  }
-
   async function insertNodeWithEditor(tab: TabState, mode: "child" | "sibling") {
-    const updatedMap = await addNode(tab, mode);
-    if (!updatedMap) return;
-    await markDirty();
-    const { map: laidOutMap, offset } = applyMapState(tab.id, updatedMap);
-    const visibleOffset = ensureVisibleOffset(laidOutMap, offset, laidOutMap.selected_node_id);
-    if (visibleOffset.x !== offset.x || visibleOffset.y !== offset.y) {
-      applyOffset(tab.id, laidOutMap, visibleOffset);
+    const result = await addNodeUsecase(stateRef.current, deps, tab.id, mode);
+    applyResult(result);
+    const updatedTab = getTabByIdState(result.state, tab.id);
+    if (updatedTab?.map) {
+      openEditor(updatedTab.map, updatedTab.offset, updatedTab.map.selected_node_id);
     }
-    openEditor(laidOutMap, visibleOffset, laidOutMap.selected_node_id);
   }
 
   async function removeSelectedNode(tab: TabState) {
-    if (!tab.map || tab.map.selected_node_id === tab.map.root_id) return;
-    const updatedMap = await mindmapApi.removeNode(tab.id, tab.map.selected_node_id);
-    await markDirty();
-    applyMapState(tab.id, updatedMap);
+    const result = await removeSelectedNodeUsecase(stateRef.current, deps, tab.id);
+    applyResult(result);
   }
 
   async function handleInsertKeys(event: KeyboardEvent, tab: TabState) {

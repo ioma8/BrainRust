@@ -18,7 +18,7 @@ export function saveMap(tabId: string, path: string) {
 }
 
 export function closeTab(tabId: string) {
-  return invoke("close_tab", { tabId });
+  return invoke<void>("close_tab", { tabId });
 }
 
 export function addChild(tabId: string, parentId: string, content: string) {
