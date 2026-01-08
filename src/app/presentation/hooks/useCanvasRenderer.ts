@@ -5,7 +5,7 @@ import type { LayoutConfig, Point, Viewport } from "../../domain/layout/types";
 import { H_GAP, MIN_NODE_WIDTH, NODE_HEIGHT, V_GAP } from "../../domain/values/layout";
 import type { ThemeColors } from "../theme/theme";
 import { iconMap } from "../constants/icons";
-import { NODE_FONT } from "../constants/typography";
+import { EMOJI_FONT, NODE_FONT } from "../constants/typography";
 const ICON_SPACING = 20;
 const TEXT_PADDING = 20;
 
@@ -114,15 +114,16 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
     isSelected: boolean
   ) {
     ctx.fillStyle = isSelected ? colors.textSelected : colors.text;
-    ctx.font = NODE_FONT;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     let currentX = x + 10;
     node.icons.forEach((iconName) => {
       const emoji = iconMap[iconName] || "?";
+      ctx.font = EMOJI_FONT;
       ctx.fillText(emoji, currentX, y + h / 2 + 1);
       currentX += ICON_SPACING;
     });
+    ctx.font = NODE_FONT;
     ctx.fillText(node.content, currentX, y + h / 2);
   }
 

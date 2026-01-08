@@ -82,4 +82,5 @@ body {
   justify-content: center;
   align-items: center;
   box-sizing: border-box;
+  font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Twemoji Mozilla", "Inter", sans-serif;
 }
