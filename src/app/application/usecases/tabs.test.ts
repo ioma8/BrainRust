@@ -14,6 +14,8 @@ function makeNode(id: string, overrides: Partial<Node> = {}): Node {
     x: 0,
     y: 0,
     icons: [],
+    created: 0,
+    modified: 0,
     ...overrides
   };
 }
@@ -42,13 +44,12 @@ function makeLayoutConfig(): LayoutConfig {
 }
 
 type TestDependencies = AppDependencies & {
-  calls: { titles: string[]; closed: string[]; confirm: string[] };
+  calls: { titles: string[]; confirm: string[] };
 };
 
 function makeDeps(overrides: Partial<TestDependencies> = {}): TestDependencies {
   const calls: TestDependencies["calls"] = {
     titles: [],
-    closed: [],
     confirm: []
   };
   const viewport: Viewport = { width: 800, height: 600 };
@@ -58,22 +59,9 @@ function makeDeps(overrides: Partial<TestDependencies> = {}): TestDependencies {
       getLayoutConfig: makeLayoutConfig,
       getViewport: () => viewport
     },
-    mindmap: {
-      newMap: async () => makeMap(),
-      getMap: async () => makeMap(),
+    mapFile: {
       loadMap: async () => makeMap(),
-      saveMap: async () => "saved.mm",
-      closeTab: async (tabId) => {
-        calls.closed.push(tabId);
-      },
-      addChild: async () => makeMap(),
-      addSibling: async () => makeMap(),
-      removeNode: async () => makeMap(),
-      changeNode: async () => makeMap(),
-      navigate: async () => "root",
-      selectNode: async () => "root",
-      addIcon: async () => makeMap(),
-      removeLastIcon: async () => makeMap()
+      saveMap: async () => "saved.mm"
     },
     dialog: {
       open: async () => null,
@@ -127,9 +115,11 @@ describe("tab usecases", () => {
       id: "tab-1",
       title: "Loaded",
       filePath: null,
+      storageTarget: null,
       isDirty: false,
       map: makeMap(),
-      offset: { x: 10, y: 20 }
+      offset: { x: 10, y: 20 },
+      cloudId: null
     };
     const state = makeState([tab], null);
 
@@ -145,9 +135,11 @@ describe("tab usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: true,
       map: makeMap(),
-      offset: { x: 0, y: 0 }
+      offset: { x: 0, y: 0 },
+      cloudId: null
     };
     const state = makeState([tab], "tab-1");
 
@@ -155,6 +147,5 @@ describe("tab usecases", () => {
 
     expect(result.state.tabs).toHaveLength(1);
     expect(result.state.activeTabId).toBe(result.state.tabs[0].id);
-    expect(deps.calls.closed).toContain("tab-1");
   });
 });

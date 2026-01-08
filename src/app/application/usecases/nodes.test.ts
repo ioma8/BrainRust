@@ -14,6 +14,8 @@ function makeNode(id: string, overrides: Partial<Node> = {}): Node {
     x: 0,
     y: 0,
     icons: [],
+    created: 0,
+    modified: 0,
     ...overrides
   };
 }
@@ -42,23 +44,10 @@ function makeLayoutConfig(): LayoutConfig {
 }
 
 type TestDependencies = AppDependencies & {
-  calls: {
-    addChild: string[];
-    removeNode: string[];
-    changeNode: string[];
-    addIcon: string[];
-    removeLastIcon: string[];
-  };
+  calls: {};
 };
 
 function makeDeps(): TestDependencies {
-  const calls: TestDependencies["calls"] = {
-    addChild: [],
-    removeNode: [],
-    changeNode: [],
-    addIcon: [],
-    removeLastIcon: []
-  };
   const viewport: Viewport = { width: 800, height: 600 };
   return {
     id: { nextId: () => "tab-1" },
@@ -66,35 +55,9 @@ function makeDeps(): TestDependencies {
       getLayoutConfig: makeLayoutConfig,
       getViewport: () => viewport
     },
-    mindmap: {
-      newMap: async () => makeMap(),
-      getMap: async () => makeMap(),
+    mapFile: {
       loadMap: async () => makeMap(),
-      saveMap: async () => "saved.mm",
-      closeTab: async () => undefined,
-      addChild: async (tabId) => {
-        calls.addChild.push(tabId);
-        return makeMap("child");
-      },
-      addSibling: async () => makeMap("sibling"),
-      removeNode: async (tabId, nodeId) => {
-        calls.removeNode.push(`${tabId}:${nodeId}`);
-        return makeMap("root");
-      },
-      changeNode: async (tabId, nodeId) => {
-        calls.changeNode.push(`${tabId}:${nodeId}`);
-        return makeMap("root");
-      },
-      navigate: async () => "root",
-      selectNode: async () => "root",
-      addIcon: async (tabId, nodeId, icon) => {
-        calls.addIcon.push(`${tabId}:${nodeId}:${icon}`);
-        return makeMap("root");
-      },
-      removeLastIcon: async (tabId, nodeId) => {
-        calls.removeLastIcon.push(`${tabId}:${nodeId}`);
-        return makeMap("root");
-      }
+      saveMap: async () => "saved.mm"
     },
     dialog: {
       open: async () => null,
@@ -107,7 +70,7 @@ function makeDeps(): TestDependencies {
       close: async () => undefined,
       destroy: async () => undefined
     },
-    calls
+    calls: {}
   };
 }
 
@@ -118,6 +81,7 @@ describe("node usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: false,
       map: makeMap(),
       offset: { x: 0, y: 0 }
@@ -128,18 +92,27 @@ describe("node usecases", () => {
 
     const updated = result.state.tabs[0];
     expect(updated.isDirty).toBe(true);
-    expect(updated.map?.selected_node_id).toBe("child");
-    expect(deps.calls.addChild).toContain("tab-1");
+    expect(updated.map?.selected_node_id).not.toBe("root");
+    expect(updated.map?.nodes[updated.map.selected_node_id]).toBeDefined();
   });
 
   it("removes the selected node and marks the tab dirty", async () => {
     const deps = makeDeps();
+    const child = makeNode("child", { parent: "root" });
     const tab: TabState = {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: false,
-      map: makeMap("to-remove"),
+      map: {
+        root_id: "root",
+        selected_node_id: "child",
+        nodes: {
+          root: makeNode("root", { children: ["child"] }),
+          child
+        }
+      },
       offset: { x: 0, y: 0 }
     };
     const state = makeState(tab);
@@ -148,7 +121,7 @@ describe("node usecases", () => {
 
     const updated = result.state.tabs[0];
     expect(updated.isDirty).toBe(true);
-    expect(deps.calls.removeNode).toContain("tab-1:to-remove");
+    expect(updated.map?.nodes.child).toBeUndefined();
   });
 
   it("updates node content and marks the tab dirty", async () => {
@@ -157,6 +130,7 @@ describe("node usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: false,
       map: makeMap("root"),
       offset: { x: 0, y: 0 }
@@ -166,7 +140,7 @@ describe("node usecases", () => {
     const result = await changeNode(state, deps, tab.id, "root", "Updated");
 
     expect(result.state.tabs[0].isDirty).toBe(true);
-    expect(deps.calls.changeNode).toContain("tab-1:root");
+    expect(result.state.tabs[0].map?.nodes.root.content).toBe("Updated");
   });
 
   it("updates icons and marks the tab dirty", async () => {
@@ -175,6 +149,7 @@ describe("node usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: false,
       map: makeMap("root"),
       offset: { x: 0, y: 0 }
@@ -184,6 +159,6 @@ describe("node usecases", () => {
     const result = await updateIcon(state, deps, tab.id, "trash");
 
     expect(result.state.tabs[0].isDirty).toBe(true);
-    expect(deps.calls.removeLastIcon).toContain("tab-1:root");
+    expect(result.state.tabs[0].map?.nodes.root.icons).toEqual([]);
   });
 });

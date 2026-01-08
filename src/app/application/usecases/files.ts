@@ -40,12 +40,15 @@ export async function saveMap(
     });
   }
   if (!path) return { state };
-  const savedPath = await deps.mindmap.saveMap(tabId, path);
+  if (!tab.map) return { state };
+  const savedPath = await deps.mapFile.saveMap(path, tab.map);
   const updatedTab = {
     ...tab,
     filePath: savedPath,
     title: fileNameFromPath(savedPath),
-    isDirty: false
+    isDirty: false,
+    storageTarget: "local" as const,
+    cloudId: null
   };
   const nextState = updateTab(state, tabId, updatedTab);
   await deps.window.setTitle(formatTitle(updatedTab));

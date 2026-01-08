@@ -21,14 +21,17 @@ import {
 } from "../application/state/tabState";
 import { CanvasView } from "./components/CanvasView";
 import { CloudPanel } from "./components/CloudPanel";
+import { CloudOpenDialog, type CloudSort } from "./components/CloudOpenDialog";
+import { CloudSaveDialog } from "./components/CloudSaveDialog";
 import { NodeEditor, type EditorStyle } from "./components/NodeEditor";
+import { SaveTargetDialog } from "./components/SaveTargetDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { useCanvasRenderer } from "./hooks/useCanvasRenderer";
 import { dialog } from "../infrastructure/tauri/dialogApi";
 import { events } from "../infrastructure/tauri/eventApi";
-import * as mindmapApi from "../infrastructure/tauri/mindmapApi";
 import { appWindow } from "../infrastructure/tauri/windowApi";
+import * as mapFileApi from "../infrastructure/tauri/mapFileApi";
 import * as cloudApi from "../infrastructure/supabase/cloudApi";
 import { isSupabaseConfigured } from "../infrastructure/supabase/client";
 import { addNode as addNodeUsecase, changeNode as changeNodeUsecase, removeSelectedNode as removeSelectedNodeUsecase, updateIcon as updateIconUsecase } from "../application/usecases/nodes";
@@ -38,6 +41,7 @@ import { closeTab as closeTabUsecase, createNewTab as createNewTabUsecase, openM
 import { openCloudMap as openCloudMapUsecase } from "../application/usecases/cloud";
 import { confirmCloseApp } from "../application/usecases/appClose";
 import type { UsecaseResult } from "../application/usecases/result";
+import { formatTitle } from "../application/usecases/title";
 import type { Session } from "@supabase/supabase-js";
 import type { CloudMapSummary } from "../infrastructure/supabase/cloudApi";
 
@@ -52,6 +56,12 @@ export function App() {
   const [editorStyle, setEditorStyle] = useState<EditorStyle | null>(null);
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [isCloudOpen, setIsCloudOpen] = useState(false);
+  const [isCloudOpenDialogOpen, setIsCloudOpenDialogOpen] = useState(false);
+  const [isCloudSaveDialogOpen, setIsCloudSaveDialogOpen] = useState(false);
+  const [cloudSaveTitle, setCloudSaveTitle] = useState("");
+  const [cloudSaveForceNew, setCloudSaveForceNew] = useState(false);
+  const [cloudSort, setCloudSort] = useState<CloudSort>("date_desc");
+  const [isSaveTargetOpen, setIsSaveTargetOpen] = useState(false);
   const [cloudSession, setCloudSession] = useState<Session | null>(null);
   const [cloudMaps, setCloudMaps] = useState<CloudMapSummary[]>([]);
   const [cloudError, setCloudError] = useState<string | null>(null);
@@ -59,6 +69,10 @@ export function App() {
 
   const stateRef = useRef<AppState>({ tabs: [], activeTabId: null });
   const editorRef = useRef<HTMLInputElement | null>(null);
+  const cloudSessionRef = useRef<Session | null>(null);
+  const saveTargetResolverRef = useRef<((target: "local" | "cloud" | null) => void) | null>(
+    null
+  );
   const dragStateRef = useRef({
     isDragging: false,
     dragStart: { x: 0, y: 0 },
@@ -80,7 +94,7 @@ export function App() {
   const deps = useMemo(() => ({
     id: { nextId: () => crypto.randomUUID() },
     layout: { getLayoutConfig, getViewport: getViewportSize },
-    mindmap: mindmapApi,
+    mapFile: mapFileApi,
     dialog,
     window: {
       setTitle: (title: string) => appWindow.setTitle(title),
@@ -92,6 +106,10 @@ export function App() {
   useEffect(() => {
     stateRef.current = appState;
   }, [appState]);
+
+  useEffect(() => {
+    cloudSessionRef.current = cloudSession;
+  }, [cloudSession]);
 
   useEffect(() => {
     const activeTab = appState.tabs.find((tab) => tab.id === appState.activeTabId);
@@ -111,10 +129,12 @@ export function App() {
       const session = await cloudApi.getSession();
       if (!isActive) return;
       setCloudSession(session);
+      cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
     const { data } = cloudApi.onAuthChange((session) => {
       setCloudSession(session);
+      cloudSessionRef.current = session;
       void refreshCloudMaps(session);
     });
     return () => {
@@ -197,6 +217,162 @@ export function App() {
     setCloudMaps(maps);
   }
 
+  const isCloudLoggedIn = Boolean(cloudSession?.user?.email);
+
+  function isOffline() {
+    return typeof navigator.onLine === "boolean" && !navigator.onLine;
+  }
+
+  function isCloudLoggedInNow() {
+    return Boolean(cloudSessionRef.current?.user?.email);
+  }
+
+  function isCloudAvailable() {
+    return isSupabaseConfigured && isCloudLoggedInNow() && !isOffline();
+  }
+
+  function requestSaveTarget(): Promise<"local" | "cloud" | null> {
+    return new Promise((resolve) => {
+      saveTargetResolverRef.current = resolve;
+      setIsSaveTargetOpen(true);
+    });
+  }
+
+  function resolveSaveTarget(target: "local" | "cloud" | null) {
+    setIsSaveTargetOpen(false);
+    const resolver = saveTargetResolverRef.current;
+    saveTargetResolverRef.current = null;
+    resolver?.(target);
+  }
+
+  async function saveLocalMap(tabId: string, saveAs: boolean) {
+    try {
+      const result = await saveMapUsecase(stateRef.current, deps, tabId, saveAs, saveFilters);
+      applyResult(result);
+    } catch (e) {
+      console.error("Save failed:", e);
+    }
+  }
+
+  async function saveCloudMap(tab: TabState, forceNew: boolean) {
+    const session = cloudSessionRef.current;
+    if (!tab.map || !session) return;
+    const mapId = forceNew ? null : tab.cloudId;
+    await runCloudAction(async () => {
+      const saved = await cloudApi.saveMap(mapId, tab.title, tab.map, session.user.id);
+      const tabForTitle: TabState = {
+        ...tab,
+        cloudId: saved.id,
+        storageTarget: "cloud",
+        filePath: null,
+        isDirty: false
+      };
+      updateAppState((state) =>
+        updateTabState(state, tab.id, {
+          cloudId: saved.id,
+          storageTarget: "cloud",
+          filePath: null,
+          isDirty: false
+        })
+      );
+      await deps.window.setTitle(formatTitle(tabForTitle));
+      await refreshCloudMaps(session);
+    });
+  }
+
+  async function saveCloudMapWithTitle(tab: TabState, title: string, forceNew: boolean) {
+    const session = cloudSessionRef.current;
+    if (!tab.map || !session) return;
+    const mapId = forceNew ? null : tab.cloudId;
+    await runCloudAction(async () => {
+      const saved = await cloudApi.saveMap(mapId, title, tab.map, session.user.id);
+      const tabForTitle: TabState = {
+        ...tab,
+        title,
+        cloudId: saved.id,
+        storageTarget: "cloud",
+        filePath: null,
+        isDirty: false
+      };
+      updateAppState((state) =>
+        updateTabState(state, tab.id, {
+          title,
+          cloudId: saved.id,
+          storageTarget: "cloud",
+          filePath: null,
+          isDirty: false
+        })
+      );
+      await deps.window.setTitle(formatTitle(tabForTitle));
+      await refreshCloudMaps(session);
+    });
+  }
+
+  async function openCloudSaveDialog(forceNew: boolean) {
+    const tab = getActiveTab();
+    if (!tab) return;
+    if (isOffline()) setCloudError("You're offline. Reconnect to save this map to the cloud.");
+    setCloudSaveTitle(tab.title);
+    setCloudSaveForceNew(forceNew);
+    setIsCloudSaveDialogOpen(true);
+  }
+
+  async function confirmCloudSave(title: string) {
+    const tab = getActiveTab();
+    if (!tab) return;
+    await saveCloudMapWithTitle(tab, title, cloudSaveForceNew);
+    setIsCloudSaveDialogOpen(false);
+  }
+
+  async function openCloudBrowserDialog() {
+    if (isCloudLoggedIn) await refreshCloud();
+    setIsCloudOpenDialogOpen(true);
+  }
+
+  async function saveWithTarget(tab: TabState, target: "local" | "cloud", forceNew: boolean) {
+    if (target === "local") {
+      await saveLocalMap(tab.id, true);
+      return;
+    }
+    if (!isCloudAvailable()) {
+      await saveLocalMap(tab.id, true);
+      return;
+    }
+    await openCloudSaveDialog(forceNew);
+  }
+
+  async function saveActiveTab(saveAs: boolean) {
+    const tab = getActiveTab();
+    if (!tab) return;
+    const needsTarget = saveAs || !tab.storageTarget;
+    if (needsTarget) {
+      if (!isCloudAvailable()) {
+        await saveLocalMap(tab.id, true);
+        return;
+      }
+      const target = await requestSaveTarget();
+      if (!target) return;
+      await saveWithTarget(tab, target, true);
+      return;
+    }
+    if (tab.storageTarget === "cloud") {
+      if (!isCloudAvailable()) {
+        await saveLocalMap(tab.id, true);
+        return;
+      }
+      await saveCloudMap(tab, false);
+      return;
+    }
+    await saveLocalMap(tab.id, false);
+  }
+
+  async function saveToCloud() {
+    const tab = getActiveTab();
+    if (!tab) return;
+    const forceNew = tab.storageTarget !== "cloud";
+    await openCloudSaveDialog(forceNew);
+  }
+
   async function createNewTab() {
     try {
       const title = `Untitled ${untitledCounterRef.current++}`;
@@ -261,21 +437,11 @@ export function App() {
     }
   }
 
-  async function saveMap(saveAs = false) {
-    const tab = getActiveTab();
-    if (!tab) return;
-    try {
-      const result = await saveMapUsecase(stateRef.current, deps, tab.id, saveAs, saveFilters);
-      applyResult(result);
-    } catch (e) {
-      console.error("Save failed:", e);
-    }
-  }
-
   async function signInCloud(email: string, password: string) {
     await runCloudAction(async () => {
       const session = await cloudApi.signIn(email, password);
       setCloudSession(session);
+      cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
   }
@@ -284,6 +450,7 @@ export function App() {
     await runCloudAction(async () => {
       const session = await cloudApi.signUp(email, password);
       setCloudSession(session);
+      cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
   }
@@ -292,6 +459,7 @@ export function App() {
     await runCloudAction(async () => {
       await cloudApi.signOut();
       setCloudSession(null);
+      cloudSessionRef.current = null;
       setCloudMaps([]);
     });
   }
@@ -299,18 +467,6 @@ export function App() {
   async function refreshCloud() {
     await runCloudAction(async () => {
       await refreshCloudMaps();
-    });
-  }
-
-  async function saveCloudMap() {
-    const tab = getActiveTab();
-    if (!tab?.map || !cloudSession) return;
-    await runCloudAction(async () => {
-      const saved = await cloudApi.saveMap(tab.cloudId, tab.title, tab.map, cloudSession.user.id);
-      updateAppState((state) =>
-        updateTabState(state, tab.id, { cloudId: saved.id, isDirty: false })
-      );
-      await refreshCloudMaps(cloudSession);
     });
   }
 
@@ -520,8 +676,17 @@ export function App() {
   async function handleMenuAction(action: string) {
     if (action === "new") return createNewMap();
     if (action === "open") return openMap();
-    if (action === "save") return saveMap(false);
-    if (action === "save_as") return saveMap(true);
+    if (action === "save") return saveActiveTab(false);
+    if (action === "save_as") return saveActiveTab(true);
+    if (action === "save_cloud") return saveToCloud();
+    if (action === "open_cloud") {
+      void openCloudBrowserDialog();
+      return;
+    }
+    if (action === "cloud_auth") {
+      setIsCloudOpen(true);
+      return;
+    }
     if (action === "exit") return appWindow.close();
     if (action === "add_child") return addNodeFromMenu("child");
     if (action === "add_sibling") return addNodeFromMenu("sibling");
@@ -665,7 +830,7 @@ export function App() {
   async function handleFileShortcuts(event: KeyboardEvent, key: string, isAccel: boolean) {
     if (!isAccel || (key !== "s" && key !== "o")) return false;
     event.preventDefault();
-    if (key === "s") await saveMap(false);
+    if (key === "s") await saveActiveTab(false);
     if (key === "o") await openMap();
     return true;
   }
@@ -691,7 +856,7 @@ export function App() {
   }, []);
 
   const activeTab = getActiveTabState(appState);
-  const canSaveCloud = Boolean(activeTab?.map && cloudSession);
+  const canSaveCloud = Boolean(activeTab?.map && isCloudAvailable());
 
   return (
     <div className="flex h-full w-full bg-[var(--app-bg)] text-[var(--text-color)]">
@@ -699,7 +864,6 @@ export function App() {
         theme={theme}
         iconButtons={iconButtons}
         onThemeChange={(nextTheme) => applyTheme(nextTheme)}
-        onOpenCloud={() => setIsCloudOpen(true)}
         onIconClick={(key) => void handleIconClick(key)}
       />
 
@@ -743,7 +907,44 @@ export function App() {
         onSignOut={signOutCloud}
         onRefresh={refreshCloud}
         onLoadMap={loadCloudMap}
-        onSaveMap={saveCloudMap}
+        onSaveMap={saveToCloud}
+      />
+      <CloudOpenDialog
+        isOpen={isCloudOpenDialogOpen}
+        isLoggedIn={isCloudLoggedIn}
+        isLoading={cloudBusy}
+        error={cloudError}
+        maps={cloudMaps}
+        sort={cloudSort}
+        onSortChange={setCloudSort}
+        onRefresh={refreshCloud}
+        onSelect={async (mapId) => {
+          await loadCloudMap(mapId);
+          setIsCloudOpenDialogOpen(false);
+        }}
+        onOpenAccount={() => {
+          setIsCloudOpenDialogOpen(false);
+          setIsCloudOpen(true);
+        }}
+        onClose={() => setIsCloudOpenDialogOpen(false)}
+      />
+      <CloudSaveDialog
+        isOpen={isCloudSaveDialogOpen}
+        isLoggedIn={isCloudLoggedIn}
+        isLoading={cloudBusy}
+        error={cloudError}
+        defaultTitle={cloudSaveTitle}
+        onSave={confirmCloudSave}
+        onOpenAccount={() => {
+          setIsCloudSaveDialogOpen(false);
+          setIsCloudOpen(true);
+        }}
+        onClose={() => setIsCloudSaveDialogOpen(false)}
+      />
+      <SaveTargetDialog
+        isOpen={isSaveTargetOpen}
+        onClose={() => resolveSaveTarget(null)}
+        onSelect={(target) => resolveSaveTarget(target)}
       />
     </div>
   );

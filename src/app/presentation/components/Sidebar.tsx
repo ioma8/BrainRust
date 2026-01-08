@@ -5,11 +5,10 @@ type SidebarProps = {
   theme: Theme;
   iconButtons: string[];
   onThemeChange: (theme: Theme) => void;
-  onOpenCloud: () => void;
   onIconClick: (key: string) => void;
 };
 
-export function Sidebar({ theme, iconButtons, onThemeChange, onOpenCloud, onIconClick }: SidebarProps) {
+export function Sidebar({ theme, iconButtons, onThemeChange, onIconClick }: SidebarProps) {
   return (
     <div
       id="sidebar"
@@ -28,14 +27,6 @@ export function Sidebar({ theme, iconButtons, onThemeChange, onOpenCloud, onIcon
           checked={theme === "dark"}
           onChange={(event) => onThemeChange(event.currentTarget.checked ? "dark" : "light")}
         />
-        <button
-          type="button"
-          className="icon-btn rounded-md px-1.5 py-1 text-base transition hover:bg-[var(--tab-button-hover)]"
-          title="Cloud"
-          onClick={onOpenCloud}
-        >
-          ☁️
-        </button>
         <button
           type="button"
           className="icon-btn rounded-md px-1.5 py-1 text-base transition hover:bg-[var(--tab-button-hover)]"

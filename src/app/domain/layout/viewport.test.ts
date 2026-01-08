@@ -20,6 +20,8 @@ function makeNode(id: string, overrides: Partial<Node> = {}): Node {
     x: 0,
     y: 0,
     icons: [],
+    created: 0,
+    modified: 0,
     ...overrides
   };
 }

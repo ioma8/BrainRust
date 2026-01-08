@@ -5,6 +5,7 @@ export type TabState = {
   id: string;
   title: string;
   filePath: string | null;
+  storageTarget: "local" | "cloud" | null;
   isDirty: boolean;
   map: MindMap | null;
   offset: Point;

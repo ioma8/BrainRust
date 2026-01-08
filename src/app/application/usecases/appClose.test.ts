@@ -8,6 +8,7 @@ function makeTab(isDirty: boolean): TabState {
     id: "tab-1",
     title: "Doc",
     filePath: null,
+    storageTarget: null,
     isDirty,
     map: null,
     offset: { x: 0, y: 0 },
@@ -28,20 +29,9 @@ function makeDeps(confirmResult: boolean): AppDependencies {
       }),
       getViewport: () => ({ width: 800, height: 600 })
     },
-    mindmap: {
-      newMap: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      getMap: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
+    mapFile: {
       loadMap: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      saveMap: async () => "saved.mm",
-      closeTab: async () => undefined,
-      addChild: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      addSibling: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      removeNode: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      changeNode: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      navigate: async () => "root",
-      selectNode: async () => "root",
-      addIcon: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} }),
-      removeLastIcon: async () => ({ root_id: "root", selected_node_id: "root", nodes: {} })
+      saveMap: async () => "saved.mm"
     },
     dialog: {
       open: async () => null,

@@ -13,6 +13,7 @@ function makeTab(id: string, title = "Untitled"): TabState {
     id,
     title,
     filePath: null,
+    storageTarget: null,
     isDirty: false,
     map: null,
     offset: { x: 0, y: 0 },

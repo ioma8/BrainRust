@@ -4,7 +4,7 @@ use brain_core::opml::{from_opml, to_opml};
 use brain_core::smmx::{from_smmx, to_smmx};
 use brain_core::storage::{from_xml, to_xml};
 use brain_core::xmind::{from_xmind, to_xmind};
-use brain_core::{MindMap, Navigation};
+use brain_core::MindMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use tauri::{Emitter, Manager, State};
@@ -12,13 +12,7 @@ use tauri::{Emitter, Manager, State};
 const MAX_RECENT_FILES: usize = 10;
 const RECENT_FILES_FILENAME: &str = "recent_files.json";
 
-struct TabState {
-    map: MindMap,
-    file_path: Option<String>,
-}
-
 struct AppState {
-    tabs: Mutex<std::collections::HashMap<String, TabState>>,
     recent_files: Mutex<Vec<String>>,
 }
 
@@ -115,6 +109,10 @@ fn build_menu<R: tauri::Runtime>(
     let open_item =
         MenuItem::with_id(handle, "open", "Open...", true, Some("CmdOrCtrl+O")).map_err(|e| e.to_string())?;
     file_menu.append(&open_item).map_err(|e| e.to_string())?;
+    let open_cloud_item =
+        MenuItem::with_id(handle, "open_cloud", "Open from Cloud...", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    file_menu.append(&open_cloud_item).map_err(|e| e.to_string())?;
     file_menu.append(&open_recent_menu).map_err(|e| e.to_string())?;
     let file_sep = PredefinedMenuItem::separator(handle).map_err(|e| e.to_string())?;
     file_menu.append(&file_sep).map_err(|e| e.to_string())?;
@@ -130,6 +128,16 @@ fn build_menu<R: tauri::Runtime>(
     )
     .map_err(|e| e.to_string())?;
     file_menu.append(&save_as_item).map_err(|e| e.to_string())?;
+    let save_cloud_item =
+        MenuItem::with_id(handle, "save_cloud", "Save to Cloud...", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    file_menu.append(&save_cloud_item).map_err(|e| e.to_string())?;
+    let cloud_sep = PredefinedMenuItem::separator(handle).map_err(|e| e.to_string())?;
+    file_menu.append(&cloud_sep).map_err(|e| e.to_string())?;
+    let cloud_auth_item =
+        MenuItem::with_id(handle, "cloud_auth", "Cloud Account...", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    file_menu.append(&cloud_auth_item).map_err(|e| e.to_string())?;
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -236,135 +244,16 @@ fn update_recent_files<R: tauri::Runtime>(
     if recent_files.len() > MAX_RECENT_FILES {
         recent_files.truncate(MAX_RECENT_FILES);
     }
-
-    persist_recent_files(handle, &recent_files)?;
-    refresh_menu(handle, &recent_files)?;
+    let recent_snapshot = recent_files.clone();
+    drop(recent_files);
+    persist_recent_files(handle, &recent_snapshot)?;
+    refresh_menu(handle, &recent_snapshot)?;
     Ok(())
 }
 
-#[tauri::command]
-fn get_map(state: State<AppState>, tab_id: String) -> Result<MindMap, String> {
-    let tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get(&tab_id).ok_or("Tab not found")?;
-    Ok(tab.map.clone())
-}
 
-#[tauri::command]
-fn new_map(state: State<AppState>, tab_id: String) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let map = MindMap::new();
-    tabs.insert(
-        tab_id,
-        TabState {
-            map: map.clone(),
-            file_path: None,
-        },
-    );
-    Ok(map)
-}
-
-#[tauri::command]
-fn get_file_path(state: State<AppState>, tab_id: String) -> Result<Option<String>, String> {
-    let tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get(&tab_id).ok_or("Tab not found")?;
-    Ok(tab.file_path.clone())
-}
-
-#[tauri::command]
-fn close_tab(state: State<AppState>, tab_id: String) -> Result<(), String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    tabs.remove(&tab_id);
-    Ok(())
-}
-
-// ... other commands (add_child, etc. - no need to modify unless needed)
-
-#[tauri::command]
-fn add_child(
-    state: State<AppState>,
-    tab_id: String,
-    parent_id: String,
-    content: String,
-) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    let new_id = tab.map.add_child(&parent_id, content)?;
-    tab.map.select_node(&new_id)?;
-    Ok(tab.map.clone())
-}
-
-#[tauri::command]
-fn add_sibling(
-    state: State<AppState>,
-    tab_id: String,
-    node_id: String,
-    content: String,
-) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    let new_id = tab.map.add_sibling(&node_id, content)?;
-    tab.map.select_node(&new_id)?;
-    Ok(tab.map.clone())
-}
-
-#[tauri::command]
-fn change_node(
-    state: State<AppState>,
-    tab_id: String,
-    node_id: String,
-    content: String,
-) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.change_node(&node_id, content)?;
-    Ok(tab.map.clone())
-}
-
-#[tauri::command]
-fn remove_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.remove_node(&node_id)?;
-    Ok(tab.map.clone())
-}
-
-#[tauri::command]
-fn navigate(state: State<AppState>, tab_id: String, direction: Navigation) -> Result<String, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.navigate(direction);
-    Ok(tab.map.selected_node_id.clone())
-}
-
-#[tauri::command]
-fn select_node(state: State<AppState>, tab_id: String, node_id: String) -> Result<String, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.select_node(&node_id)?;
-    Ok(tab.map.selected_node_id.clone())
-}
-
-#[tauri::command]
-fn save_map(
-    app: tauri::AppHandle,
-    state: State<AppState>,
-    tab_id: String,
-    path: Option<String>,
-) -> Result<String, String> {
-    let (map, target_path) = {
-        let tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-        let tab = tabs.get(&tab_id).ok_or("Tab not found")?;
-        let target_path = if let Some(p) = path {
-            p
-        } else if let Some(p) = &tab.file_path {
-            p.clone()
-        } else {
-            return Err("No path specified and no current path defined".to_string());
-        };
-        (tab.map.clone(), target_path)
-    };
-
-    let path_obj = Path::new(&target_path);
+fn read_map_from_path(path: &str) -> Result<MindMap, String> {
+    let path_obj = Path::new(path);
     let ext = path_obj
         .extension()
         .and_then(|s| s.to_str())
@@ -373,138 +262,95 @@ fn save_map(
 
     match ext.as_str() {
         "xmind" => {
-            let content = to_xmind(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content = std::fs::read(path).map_err(|e| e.to_string())?;
+            from_xmind(&content)
         }
         "opml" => {
-            let content = to_opml(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            from_opml(&content)
         }
         "mmap" => {
-            let content = to_mmap(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content = std::fs::read(path).map_err(|e| e.to_string())?;
+            from_mmap(&content)
         }
         "mindnode" => {
-            let content = to_mindnode(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content = std::fs::read(path).map_err(|e| e.to_string())?;
+            from_mindnode(&content)
         }
         "smmx" => {
-            let content = to_smmx(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content_bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            if content_bytes.len() > 4 && &content_bytes[0..4] == b"PK\x03\x04" {
+                return Err("SMMX ZIP format not yet supported".to_string());
+            }
+            let content_str =
+                String::from_utf8(content_bytes).map_err(|_| "Invalid UTF-8".to_string())?;
+            from_smmx(&content_str)
         }
         _ => {
-            // Default to FreeMind (.mm)
-            let content = to_xml(&map)?;
-            std::fs::write(&target_path, content).map_err(|e| e.to_string())?;
+            let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            from_xml(&content)
         }
     }
-
-    {
-        let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-        let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-        if tab.file_path.as_deref() != Some(target_path.as_str()) {
-            tab.file_path = Some(target_path.clone());
-        }
-    }
-
-    update_recent_files(&app, &state, &target_path)?;
-    Ok(target_path)
 }
 
-#[tauri::command]
-fn load_map(
-    app: tauri::AppHandle,
-    state: State<AppState>,
-    tab_id: String,
-    path: String,
-) -> Result<MindMap, String> {
-    let path_obj = Path::new(&path);
+fn write_map_to_path(map: &MindMap, path: &str) -> Result<(), String> {
+    let path_obj = Path::new(path);
     let ext = path_obj
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_lowercase();
 
-    let new_map = match ext.as_str() {
+    match ext.as_str() {
         "xmind" => {
-            let content = std::fs::read(&path).map_err(|e| e.to_string())?;
-            from_xmind(&content)?
+            let content = to_xmind(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
         "opml" => {
-            let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            from_opml(&content)?
+            let content = to_opml(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
         "mmap" => {
-            let content = std::fs::read(&path).map_err(|e| e.to_string())?;
-            from_mmap(&content)?
+            let content = to_mmap(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
         "mindnode" => {
-            let content = std::fs::read(&path).map_err(|e| e.to_string())?;
-            from_mindnode(&content)?
+            let content = to_mindnode(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
         "smmx" => {
-            // SMMX can be XML or ZIP. Try XML first, if fails, try ZIP?
-            // Or check magic bytes?
-            // For now, let's try reading as string. If it fails (binary), try reading as zip.
-            // Actually, `from_smmx` currently expects XML string.
-            // If it's a zip, `read_to_string` might fail or return garbage.
-            // Let's try to read as bytes.
-            let content_bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-            // Check if it looks like a zip (PK header)
-            if content_bytes.len() > 4 && &content_bytes[0..4] == b"PK\x03\x04" {
-                // It's a zip, but we haven't implemented SMMX zip reading yet.
-                // Assuming XML for now as per implementation.
-                // If user provides ZIP SMMX, this will fail.
-                // TODO: Implement SMMX ZIP support if needed.
-                return Err("SMMX ZIP format not yet supported".to_string());
-            } else {
-                let content_str =
-                    String::from_utf8(content_bytes).map_err(|_| "Invalid UTF-8".to_string())?;
-                from_smmx(&content_str)?
-            }
+            let content = to_smmx(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
         _ => {
-            // Default to FreeMind (.mm)
-            let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            from_xml(&content)?
+            let content = to_xml(map)?;
+            std::fs::write(path, content).map_err(|e| e.to_string())?;
         }
-    };
+    }
+    Ok(())
+}
 
-    let updated_map = {
-        let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-        let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-        tab.map = new_map;
-        tab.file_path = Some(path.clone());
-        tab.map.clone()
-    };
-
+#[tauri::command]
+fn load_map_file(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    path: String,
+) -> Result<MindMap, String> {
+    let map = read_map_from_path(&path)?;
     update_recent_files(&app, &state, &path)?;
-    Ok(updated_map)
+    Ok(map)
 }
 
 #[tauri::command]
-fn add_icon(
+fn save_map_file(
+    app: tauri::AppHandle,
     state: State<AppState>,
-    tab_id: String,
-    node_id: String,
-    icon: String,
-) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.add_icon(&node_id, icon)?;
-    Ok(tab.map.clone())
-}
-
-#[tauri::command]
-fn remove_last_icon(
-    state: State<AppState>,
-    tab_id: String,
-    node_id: String,
-) -> Result<MindMap, String> {
-    let mut tabs = lock_mutex(&state.tabs, "Tabs state lock was poisoned")?;
-    let tab = tabs.get_mut(&tab_id).ok_or("Tab not found")?;
-    tab.map.remove_last_icon(&node_id)?;
-    Ok(tab.map.clone())
+    path: String,
+    map: MindMap,
+) -> Result<String, String> {
+    write_map_to_path(&map, &path)?;
+    update_recent_files(&app, &state, &path)?;
+    Ok(path)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -513,24 +359,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            tabs: Mutex::new(std::collections::HashMap::new()),
             recent_files: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
-            get_map,
-            new_map,
-            get_file_path,
-            close_tab,
-            add_child,
-            add_sibling,
-            change_node,
-            remove_node,
-            navigate,
-            select_node,
-            save_map,
-            load_map,
-            add_icon,
-            remove_last_icon
+            load_map_file,
+            save_map_file
         ])
         .setup(|app| {
             let handle = app.handle();
@@ -592,6 +425,15 @@ pub fn run() {
                     }
                     "save_as" => {
                         let _ = app.emit("menu-event", "save_as");
+                    }
+                    "save_cloud" => {
+                        let _ = app.emit("menu-event", "save_cloud");
+                    }
+                    "open_cloud" => {
+                        let _ = app.emit("menu-event", "open_cloud");
+                    }
+                    "cloud_auth" => {
+                        let _ = app.emit("menu-event", "cloud_auth");
                     }
                     "exit" => {
                         let _ = app.emit("menu-event", "exit");

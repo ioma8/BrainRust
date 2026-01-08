@@ -14,6 +14,8 @@ function makeNode(id: string, overrides: Partial<Node> = {}): Node {
     x: 0,
     y: 0,
     icons: [],
+    created: 0,
+    modified: 0,
     ...overrides
   };
 }
@@ -58,26 +60,15 @@ function makeDeps(overrides: Partial<TestDependencies> = {}): TestDependencies {
       getLayoutConfig: makeLayoutConfig,
       getViewport: () => viewport
     },
-    mindmap: {
-      newMap: async () => makeMap(),
-      getMap: async () => makeMap(),
-      loadMap: async (_tabId, path) => {
+    mapFile: {
+      loadMap: async (path) => {
         calls.opened.push(path);
         return makeMap();
       },
-      saveMap: async (_tabId, path) => {
+      saveMap: async (path) => {
         calls.saved.push(path);
         return path;
-      },
-      closeTab: async () => undefined,
-      addChild: async () => makeMap(),
-      addSibling: async () => makeMap(),
-      removeNode: async () => makeMap(),
-      changeNode: async () => makeMap(),
-      navigate: async () => "root",
-      selectNode: async () => "root",
-      addIcon: async () => makeMap(),
-      removeLastIcon: async () => makeMap()
+      }
     },
     dialog: {
       open: async () => null,
@@ -105,9 +96,11 @@ describe("file usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: "/tmp/doc.mm",
+      storageTarget: "local",
       isDirty: true,
       map: makeMap(),
-      offset: { x: 0, y: 0 }
+      offset: { x: 0, y: 0 },
+      cloudId: null
     };
     const state = makeState(tab);
 
@@ -130,9 +123,11 @@ describe("file usecases", () => {
       id: "tab-1",
       title: "Doc",
       filePath: null,
+      storageTarget: null,
       isDirty: true,
       map: makeMap(),
-      offset: { x: 0, y: 0 }
+      offset: { x: 0, y: 0 },
+      cloudId: null
     };
     const state = makeState(tab);
 

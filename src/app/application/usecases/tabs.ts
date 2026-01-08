@@ -12,12 +12,20 @@ import type { AppDependencies } from "./types";
 import { defaultOffset, layoutMap } from "./layout";
 import type { UsecaseResult } from "./result";
 import { formatTitle } from "./title";
+import { createMindMap } from "../../domain/mindmap/mindmap";
 
-function buildTab(tabId: string, title: string, filePath: string | null, offset: Point): TabState {
+function buildTab(
+  tabId: string,
+  title: string,
+  filePath: string | null,
+  offset: Point,
+  storageTarget: "local" | "cloud" | null
+): TabState {
   return {
     id: tabId,
     title,
     filePath,
+    storageTarget,
     isDirty: false,
     map: null,
     offset,
@@ -44,9 +52,9 @@ export async function createNewTab(
 ): Promise<UsecaseResult> {
   const tabId = deps.id.nextId();
   const baseOffset = defaultOffset(deps.layout);
-  const tab = buildTab(tabId, title, null, baseOffset);
+  const tab = buildTab(tabId, title, null, baseOffset, null);
   let nextState = addTab(state, tab, true);
-  const map = await deps.mindmap.newMap(tabId);
+  const map = createMindMap();
   const { map: laidOutMap, offset } = layoutMap(map, deps.layout, true, baseOffset);
   const updatedTab = { ...tab, map: laidOutMap, offset };
   nextState = updateTab(nextState, tabId, updatedTab);
@@ -63,16 +71,9 @@ export async function switchToTab(
   const tab = getTabById(state, tabId);
   if (!tab) return { state };
   let nextState = setActiveTab(state, tabId);
-  if (tab.map) {
-    await updateWindowTitle(deps, tab);
-    return { state: nextState, render: { map: tab.map, offset: tab.offset } };
-  }
-  const map = await deps.mindmap.getMap(tabId);
-  const { map: laidOutMap, offset } = layoutMap(map, deps.layout, fit, tab.offset);
-  const updatedTab = { ...tab, map: laidOutMap, offset };
-  nextState = updateTab(nextState, tabId, updatedTab);
-  await updateWindowTitle(deps, updatedTab);
-  return { state: nextState, render: { map: laidOutMap, offset } };
+  if (!tab.map) return { state: nextState };
+  await updateWindowTitle(deps, tab);
+  return { state: nextState, render: { map: tab.map, offset: tab.offset } };
 }
 
 export async function openMapPath(
@@ -85,10 +86,9 @@ export async function openMapPath(
   const tabId = deps.id.nextId();
   const baseOffset = defaultOffset(deps.layout);
   const title = path.split(/[\\/]/).pop() || path;
-  const tab = buildTab(tabId, title, path, baseOffset);
+  const tab = buildTab(tabId, title, path, baseOffset, "local");
   let nextState = addTab(state, tab, true);
-  await deps.mindmap.newMap(tabId);
-  const map = await deps.mindmap.loadMap(tabId, path);
+  const map = await deps.mapFile.loadMap(path);
   const { map: laidOutMap, offset } = layoutMap(map, deps.layout, true, baseOffset);
   const updatedTab = { ...tab, map: laidOutMap, offset };
   nextState = updateTab(nextState, tabId, updatedTab);
@@ -106,7 +106,6 @@ export async function closeTab(
   if (!tab) return { state };
   const confirmed = await confirmTabClose(tab, deps);
   if (!confirmed) return { state };
-  await deps.mindmap.closeTab(tabId);
   const { state: nextState } = closeTabState(state, tabId);
   if (nextState.tabs.length === 0) {
     return createNewTab(nextState, deps, fallbackTitle);

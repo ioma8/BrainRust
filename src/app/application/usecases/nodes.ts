@@ -3,6 +3,7 @@ import type { AppDependencies } from "./types";
 import type { UsecaseResult } from "./result";
 import { ensureVisibleOffset, layoutMap } from "./layout";
 import { formatTitle } from "./title";
+import { addChild, addIcon, addSibling, changeNode as changeNodeDomain, removeLastIcon, removeNode, selectNode } from "../../domain/mindmap/mindmap";
 
 type NodeMode = "child" | "sibling";
 
@@ -16,10 +17,11 @@ export async function addNode(
   if (!tab?.map) return { state };
   const isRootSelected = tab.map.selected_node_id === tab.map.root_id;
   const resolvedMode = mode === "sibling" && isRootSelected ? "child" : mode;
-  const map = resolvedMode === "child"
-    ? await deps.mindmap.addChild(tab.id, tab.map.selected_node_id, "New Node")
-    : await deps.mindmap.addSibling(tab.id, tab.map.selected_node_id, "New Node");
-  const { map: laidOutMap, offset } = layoutMap(map, deps.layout, false, tab.offset);
+  const result = resolvedMode === "child"
+    ? addChild(tab.map, tab.map.selected_node_id, "New Node")
+    : addSibling(tab.map, tab.map.selected_node_id, "New Node");
+  const selectedMap = selectNode(result.map, result.newId);
+  const { map: laidOutMap, offset } = layoutMap(selectedMap, deps.layout, false, tab.offset);
   const visibleOffset = ensureVisibleOffset(
     laidOutMap,
     deps.layout,
@@ -41,7 +43,7 @@ export async function removeSelectedNode(
   const tab = getTabById(state, tabId);
   if (!tab?.map) return { state };
   if (tab.map.selected_node_id === tab.map.root_id) return { state };
-  const map = await deps.mindmap.removeNode(tabId, tab.map.selected_node_id);
+  const map = removeNode(tab.map, tab.map.selected_node_id);
   const { map: laidOutMap, offset } = layoutMap(map, deps.layout, false, tab.offset);
   const updatedTab = { ...tab, map: laidOutMap, offset };
   let nextState = updateTab(state, tabId, updatedTab);
@@ -59,7 +61,7 @@ export async function changeNode(
 ): Promise<UsecaseResult> {
   const tab = getTabById(state, tabId);
   if (!tab?.map) return { state };
-  const map = await deps.mindmap.changeNode(tabId, nodeId, content);
+  const map = changeNodeDomain(tab.map, nodeId, content);
   const { map: laidOutMap, offset } = layoutMap(map, deps.layout, false, tab.offset);
   const updatedTab = { ...tab, map: laidOutMap, offset };
   let nextState = updateTab(state, tabId, updatedTab);
@@ -78,8 +80,8 @@ export async function updateIcon(
   if (!tab?.map) return { state };
   const nodeId = tab.map.selected_node_id;
   const map = icon === "trash"
-    ? await deps.mindmap.removeLastIcon(tabId, nodeId)
-    : await deps.mindmap.addIcon(tabId, nodeId, icon);
+    ? removeLastIcon(tab.map, nodeId)
+    : addIcon(tab.map, nodeId, icon);
   const { map: laidOutMap, offset } = layoutMap(map, deps.layout, false, tab.offset);
   const updatedTab = { ...tab, map: laidOutMap, offset };
   let nextState = updateTab(state, tabId, updatedTab);

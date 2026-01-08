@@ -6,6 +6,8 @@ export interface Node {
     x: number;
     y: number;
     icons: string[];
+    created: number;
+    modified: number;
 }
 
 export interface MindMap {

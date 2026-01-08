@@ -33,6 +33,9 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
                 {tab.title}
                 {tab.isDirty ? "*" : ""}
               </span>
+              {tab.storageTarget === "cloud" ? (
+                <span className="badge badge-primary badge-xs">☁️</span>
+              ) : null}
               <button
                 type="button"
                 className="btn btn-ghost btn-xs h-5 min-h-5 w-5 rounded-full p-0 opacity-70 hover:bg-base-300"
