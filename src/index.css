@@ -1,72 +1,27 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
 @import "./fonts.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 :root {
-  color-scheme: light;
-  --app-bg: #f4f6fa;
-  --canvas-bg: #f9fafc;
-  --sidebar-bg: #eef2f7;
-  --sidebar-border: #d9dee7;
-  --toolbar-border: #e1e6ef;
-  --node-bg: #ffffff;
-  --node-selected-bg: #2f6feb;
-  --node-border: #d7dde7;
-  --node-selected-border: #2557c7;
-  --node-selected-glow: rgba(47, 111, 235, 0.25);
-  --edge-color: #b7c0ce;
-  --text-color: #1c2330;
-  --text-color-selected: #ffffff;
-  --editor-bg: #ffffff;
-  --editor-border: #2f6feb;
-  --toggle-bg: #dbe2ee;
-  --toggle-border: #c7d1e0;
-  --toggle-knob: #ffffff;
-  --toggle-bg-hover: #d0d8e6;
-  --tabbar-bg: #e9edf3;
-  --tab-bg: #e3e8f0;
-  --tab-border: #cdd5e1;
-  --tab-active-bg: #ffffff;
-  --tab-active-border: #cdd5e1;
-  --tab-text: #414b5c;
-  --tab-text-active: #1a1f29;
-  --tab-close-hover: rgba(30, 41, 59, 0.12);
-  --tab-button-hover: rgba(30, 41, 59, 0.1);
-  --tabbar-height: 40px;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --app-bg: #14161b;
-  --canvas-bg: #181b21;
-  --sidebar-bg: #15181d;
-  --sidebar-border: #242932;
-  --toolbar-border: #242932;
-  --node-bg: #242a34;
-  --node-selected-bg: #4f7dff;
-  --node-border: #343c48;
-  --node-selected-border: #87a6ff;
-  --node-selected-glow: rgba(79, 125, 255, 0.35);
-  --edge-color: #7c8796;
-  --text-color: #e7ecf3;
-  --text-color-selected: #ffffff;
-  --editor-bg: #242a34;
-  --editor-border: #5a86ff;
-  --toggle-bg: #1c2128;
-  --toggle-border: #2a303a;
-  --toggle-knob: #c7cfdb;
-  --toggle-bg-hover: #222832;
-  --tabbar-bg: #10151b;
-  --tab-bg: #1c212a;
-  --tab-border: #2a323e;
-  --tab-active-bg: #232b36;
-  --tab-active-border: #2f3845;
-  --tab-text: #c2c9d4;
-  --tab-text-active: #f2f5fb;
-  --tab-close-hover: rgba(226, 232, 240, 0.16);
-  --tab-button-hover: rgba(226, 232, 240, 0.12);
+  --app-bg: var(--color-base-200);
+  --canvas-bg: var(--color-base-100);
+  --sidebar-bg: var(--color-base-200);
+  --sidebar-border: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  --toolbar-border: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  --node-bg: var(--color-base-100);
+  --node-selected-bg: var(--color-primary);
+  --node-border: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  --node-selected-border: color-mix(in oklab, var(--color-primary) 85%, black 15%);
+  --node-selected-glow: color-mix(in oklab, var(--color-primary) 35%, transparent);
+  --edge-color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+  --text-color: var(--color-base-content);
+  --text-color-selected: var(--color-primary-content);
+  --editor-bg: var(--color-base-100);
+  --editor-border: var(--color-primary);
+  --tab-border: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  --tab-button-hover: color-mix(in oklab, var(--color-base-content) 12%, transparent);
   --tabbar-height: 40px;
 }
 
@@ -94,47 +49,13 @@ body {
   border-radius: 999px;
 }
 
-.theme-toggle {
-  width: 28px;
-  height: 16px;
-  border-radius: 999px;
-  border: 1px solid var(--toggle-border);
-  background: var(--toggle-bg);
-  position: relative;
-  padding: 0;
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
-  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.12);
-}
-
-.theme-toggle::after {
-  content: "";
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--toggle-knob);
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  transition: transform 150ms ease;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
-}
-
-:root[data-theme="light"] .theme-toggle::after {
-  transform: translateX(12px);
-}
-
-.theme-toggle:hover {
-  background: var(--toggle-bg-hover);
-}
-
 #toolbar-scrollable {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
 #sidebar:hover #toolbar-scrollable {
-  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 30%, transparent) transparent;
 }
 
 #toolbar-scrollable::-webkit-scrollbar {
@@ -148,11 +69,11 @@ body {
 }
 
 #sidebar:hover #toolbar-scrollable::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
+  background: color-mix(in oklab, var(--color-base-content) 30%, transparent);
 }
 
 #sidebar:hover #toolbar-scrollable::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: color-mix(in oklab, var(--color-base-content) 45%, transparent);
 }
 
 .icon-btn {

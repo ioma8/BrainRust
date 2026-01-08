@@ -12,9 +12,9 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
   return (
     <div
       id="tab-bar"
-      className="flex h-[var(--tabbar-height)] items-center gap-2 border-b border-[var(--tab-border)] bg-[var(--tabbar-bg)] px-2 shadow-[0_1px_0_rgba(15,23,42,0.06)]"
+      className="flex items-end bg-base-200 px-2"
     >
-      <div id="tabs" className="flex flex-1 items-center gap-1.5 overflow-x-auto py-1">
+      <div id="tabs" role="tablist" className="tabs tabs-lift flex-1 overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
@@ -25,11 +25,8 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
               title={tab.filePath || tab.title}
               onClick={() => onSelectTab(tab.id)}
               className={[
-                "inline-flex max-w-[220px] cursor-pointer items-center gap-2 overflow-hidden rounded-t-lg rounded-b-md border px-3 py-1.5 text-[13px] transition",
-                "border-[var(--tab-border)] bg-[var(--tab-bg)] text-[var(--tab-text)] hover:border-[var(--tab-active-border)] hover:bg-[var(--tab-active-bg)]",
-                isActive
-                  ? "border-[var(--tab-active-border)] bg-[var(--tab-active-bg)] text-[var(--tab-text-active)] shadow-[0_6px_16px_rgba(15,23,42,0.12)]"
-                  : ""
+                "tab group gap-2 text-sm transition",
+                isActive ? "tab-active font-semibold" : ""
               ].join(" ")}
             >
               <span className="truncate">
@@ -38,7 +35,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
               </span>
               <button
                 type="button"
-                className="flex h-4 w-4 items-center justify-center rounded-full text-xs opacity-60 transition hover:bg-[var(--tab-close-hover)] hover:opacity-100"
+                className="btn btn-ghost btn-xs h-5 min-h-5 w-5 rounded-full p-0 opacity-70 hover:bg-base-300"
                 onClick={(event) => {
                   event.stopPropagation();
                   onCloseTab(tab.id);
@@ -53,7 +50,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
           id="new-tab-btn"
           type="button"
           aria-label="New tab"
-          className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full border border-[var(--tab-border)] bg-transparent text-[var(--tab-text)] transition hover:border-[var(--tab-active-border)] hover:bg-[var(--tab-button-hover)]"
+          className="tab gap-2 text-sm"
           onClick={onNewTab}
         >
           +

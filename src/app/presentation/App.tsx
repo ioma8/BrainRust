@@ -35,7 +35,8 @@ import { closeTab as closeTabUsecase, createNewTab as createNewTabUsecase, openM
 import { confirmCloseApp } from "../application/usecases/appClose";
 import type { UsecaseResult } from "../application/usecases/result";
 
-
+// TODO: DaisyUI pouzit? https://daisyui.com/docs/install/ 
+// https://chakra-ui.com/
 
 export function App() {
   const [appState, setAppState] = useState<AppState>({
@@ -365,7 +366,6 @@ export function App() {
   }
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
     persistTheme(theme);
     updateThemeColors();
     renderActiveTab();
@@ -588,7 +588,7 @@ export function App() {
       <Sidebar
         theme={theme}
         iconButtons={iconButtons}
-        onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
+        onThemeChange={(nextTheme) => applyTheme(nextTheme)}
         onIconClick={(key) => void handleIconClick(key)}
       />
 

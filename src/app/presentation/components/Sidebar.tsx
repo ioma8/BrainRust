@@ -4,11 +4,11 @@ import { iconMap } from "../constants/icons";
 type SidebarProps = {
   theme: Theme;
   iconButtons: string[];
-  onToggleTheme: () => void;
+  onThemeChange: (theme: Theme) => void;
   onIconClick: (key: string) => void;
 };
 
-export function Sidebar({ theme, iconButtons, onToggleTheme, onIconClick }: SidebarProps) {
+export function Sidebar({ theme, iconButtons, onThemeChange, onIconClick }: SidebarProps) {
   return (
     <div
       id="sidebar"
@@ -18,13 +18,14 @@ export function Sidebar({ theme, iconButtons, onToggleTheme, onIconClick }: Side
         id="toolbar-fixed"
         className="flex flex-col items-center gap-2 border-b border-[var(--toolbar-border)] bg-[var(--sidebar-bg)] py-3"
       >
-        <button
-          type="button"
-          className="theme-toggle"
+        <input
+          type="checkbox"
+          value="dark"
+          className="toggle toggle-sm theme-controller"
           aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          aria-pressed={theme === "dark"}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          onClick={onToggleTheme}
+          checked={theme === "dark"}
+          onChange={(event) => onThemeChange(event.currentTarget.checked ? "dark" : "light")}
         />
         <button
           type="button"
