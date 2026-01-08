@@ -15,7 +15,8 @@ function makeTab(id: string, title = "Untitled"): TabState {
     filePath: null,
     isDirty: false,
     map: null,
-    offset: { x: 0, y: 0 }
+    offset: { x: 0, y: 0 },
+    cloudId: null
   };
 }
 

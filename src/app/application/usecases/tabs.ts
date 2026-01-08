@@ -20,7 +20,8 @@ function buildTab(tabId: string, title: string, filePath: string | null, offset:
     filePath,
     isDirty: false,
     map: null,
-    offset
+    offset,
+    cloudId: null
   };
 }
 

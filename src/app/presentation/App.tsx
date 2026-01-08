@@ -20,6 +20,7 @@ import {
   type TabState
 } from "../application/state/tabState";
 import { CanvasView } from "./components/CanvasView";
+import { CloudPanel } from "./components/CloudPanel";
 import { NodeEditor, type EditorStyle } from "./components/NodeEditor";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
@@ -28,15 +29,19 @@ import { dialog } from "../infrastructure/tauri/dialogApi";
 import { events } from "../infrastructure/tauri/eventApi";
 import * as mindmapApi from "../infrastructure/tauri/mindmapApi";
 import { appWindow } from "../infrastructure/tauri/windowApi";
+import * as cloudApi from "../infrastructure/supabase/cloudApi";
+import { isSupabaseConfigured } from "../infrastructure/supabase/client";
 import { addNode as addNodeUsecase, changeNode as changeNodeUsecase, removeSelectedNode as removeSelectedNodeUsecase, updateIcon as updateIconUsecase } from "../application/usecases/nodes";
 import { navigateSelection as navigateSelectionUsecase, selectNode as selectNodeUsecase } from "../application/usecases/selection";
 import { openFromDialog as openFromDialogUsecase, saveMap as saveMapUsecase } from "../application/usecases/files";
 import { closeTab as closeTabUsecase, createNewTab as createNewTabUsecase, openMapPath as openMapPathUsecase, switchToTab as switchToTabUsecase } from "../application/usecases/tabs";
+import { openCloudMap as openCloudMapUsecase } from "../application/usecases/cloud";
 import { confirmCloseApp } from "../application/usecases/appClose";
 import type { UsecaseResult } from "../application/usecases/result";
+import type { Session } from "@supabase/supabase-js";
+import type { CloudMapSummary } from "../infrastructure/supabase/cloudApi";
 
 // TODO: DaisyUI pouzit? https://daisyui.com/docs/install/ 
-// https://chakra-ui.com/
 
 export function App() {
   const [appState, setAppState] = useState<AppState>({
@@ -46,6 +51,11 @@ export function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [editorStyle, setEditorStyle] = useState<EditorStyle | null>(null);
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  const [isCloudOpen, setIsCloudOpen] = useState(false);
+  const [cloudSession, setCloudSession] = useState<Session | null>(null);
+  const [cloudMaps, setCloudMaps] = useState<CloudMapSummary[]>([]);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
 
   const stateRef = useRef<AppState>({ tabs: [], activeTabId: null });
   const editorRef = useRef<HTMLInputElement | null>(null);
@@ -94,6 +104,25 @@ export function App() {
     isEditingRef.current = isEditing;
   }, [isEditing]);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let isActive = true;
+    void runCloudAction(async () => {
+      const session = await cloudApi.getSession();
+      if (!isActive) return;
+      setCloudSession(session);
+      await refreshCloudMaps(session);
+    });
+    const { data } = cloudApi.onAuthChange((session) => {
+      setCloudSession(session);
+      void refreshCloudMaps(session);
+    });
+    return () => {
+      isActive = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
   const iconButtons = useMemo(() => iconKeys.filter((key) => key !== "trash"), []);
 
   function getActiveTab(): TabState | null {
@@ -138,6 +167,34 @@ export function App() {
     if (result.render) {
       renderCanvas(result.render.map, result.render.offset);
     }
+  }
+
+  function formatCloudError(error: unknown) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    return "Unexpected cloud error.";
+  }
+
+  async function runCloudAction(action: () => Promise<void>) {
+    setCloudBusy(true);
+    setCloudError(null);
+    try {
+      await action();
+    } catch (error) {
+      setCloudError(formatCloudError(error));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function refreshCloudMaps(sessionOverride?: Session | null) {
+    const session = sessionOverride ?? cloudSession;
+    if (!session) {
+      setCloudMaps([]);
+      return;
+    }
+    const maps = await cloudApi.listMaps();
+    setCloudMaps(maps);
   }
 
   async function createNewTab() {
@@ -213,6 +270,56 @@ export function App() {
     } catch (e) {
       console.error("Save failed:", e);
     }
+  }
+
+  async function signInCloud(email: string, password: string) {
+    await runCloudAction(async () => {
+      const session = await cloudApi.signIn(email, password);
+      setCloudSession(session);
+      await refreshCloudMaps(session);
+    });
+  }
+
+  async function signUpCloud(email: string, password: string) {
+    await runCloudAction(async () => {
+      const session = await cloudApi.signUp(email, password);
+      setCloudSession(session);
+      await refreshCloudMaps(session);
+    });
+  }
+
+  async function signOutCloud() {
+    await runCloudAction(async () => {
+      await cloudApi.signOut();
+      setCloudSession(null);
+      setCloudMaps([]);
+    });
+  }
+
+  async function refreshCloud() {
+    await runCloudAction(async () => {
+      await refreshCloudMaps();
+    });
+  }
+
+  async function saveCloudMap() {
+    const tab = getActiveTab();
+    if (!tab?.map || !cloudSession) return;
+    await runCloudAction(async () => {
+      const saved = await cloudApi.saveMap(tab.cloudId, tab.title, tab.map, cloudSession.user.id);
+      updateAppState((state) =>
+        updateTabState(state, tab.id, { cloudId: saved.id, isDirty: false })
+      );
+      await refreshCloudMaps(cloudSession);
+    });
+  }
+
+  async function loadCloudMap(mapId: string) {
+    await runCloudAction(async () => {
+      const detail = await cloudApi.loadMap(mapId);
+      const result = await openCloudMapUsecase(stateRef.current, deps, detail.title, detail.content, detail.id);
+      applyResult(result);
+    });
   }
 
   async function handleIconClick(key: string) {
@@ -583,12 +690,16 @@ export function App() {
     };
   }, []);
 
+  const activeTab = getActiveTabState(appState);
+  const canSaveCloud = Boolean(activeTab?.map && cloudSession);
+
   return (
     <div className="flex h-full w-full bg-[var(--app-bg)] text-[var(--text-color)]">
       <Sidebar
         theme={theme}
         iconButtons={iconButtons}
         onThemeChange={(nextTheme) => applyTheme(nextTheme)}
+        onOpenCloud={() => setIsCloudOpen(true)}
         onIconClick={(key) => void handleIconClick(key)}
       />
 
@@ -617,6 +728,22 @@ export function App() {
         onBlur={() => {
           if (isEditingRef.current) void finishEdit();
         }}
+      />
+      <CloudPanel
+        isOpen={isCloudOpen}
+        isConfigured={isSupabaseConfigured}
+        isLoading={cloudBusy}
+        error={cloudError}
+        sessionEmail={cloudSession?.user.email ?? null}
+        maps={cloudMaps}
+        canSave={canSaveCloud}
+        onClose={() => setIsCloudOpen(false)}
+        onSignIn={signInCloud}
+        onSignUp={signUpCloud}
+        onSignOut={signOutCloud}
+        onRefresh={refreshCloud}
+        onLoadMap={loadCloudMap}
+        onSaveMap={saveCloudMap}
       />
     </div>
   );

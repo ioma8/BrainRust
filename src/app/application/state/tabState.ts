@@ -8,6 +8,7 @@ export type TabState = {
   isDirty: boolean;
   map: MindMap | null;
   offset: Point;
+  cloudId: string | null;
 };
 
 export type AppState = {

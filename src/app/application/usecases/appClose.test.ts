@@ -10,7 +10,8 @@ function makeTab(isDirty: boolean): TabState {
     filePath: null,
     isDirty,
     map: null,
-    offset: { x: 0, y: 0 }
+    offset: { x: 0, y: 0 },
+    cloudId: null
   };
 }
 
