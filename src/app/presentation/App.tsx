@@ -27,6 +27,7 @@ import { isSupabaseConfigured } from "../infrastructure/supabase/client";
 import { confirmCloseApp } from "../application/usecases/appClose";
 import type { UsecaseResult } from "../application/usecases/result";
 import { formatTitle } from "../application/usecases/title";
+import { relayoutAllTabs } from "../application/usecases/relayout";
 
 // TODO: DaisyUI pouzit? https://daisyui.com/docs/install/ 
 
@@ -203,7 +204,7 @@ export function App() {
     resizeCanvas();
     void ensureFontsLoaded().then(() => {
       updateThemeColors();
-      renderActiveTab();
+      applyResult(relayoutAllTabs(stateRef.current, deps));
     });
 
     let observer: ResizeObserver | null = null;

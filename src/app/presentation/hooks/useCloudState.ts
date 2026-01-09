@@ -24,6 +24,9 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
   const [cloudMaps, setCloudMaps] = useState<CloudMapSummary[]>([]);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => {
+    return typeof navigator.onLine === "boolean" ? navigator.onLine : true;
+  });
 
   const formatCloudError = useCallback((error: unknown) => {
     if (error instanceof Error) return error.message;
@@ -76,6 +79,18 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
     };
   }, [isSupabaseConfigured, refreshCloudMaps, runCloudAction]);
 
+  useEffect(() => {
+    const sync = () => {
+      setIsOnline(typeof navigator.onLine === "boolean" ? navigator.onLine : true);
+    };
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+
   const refreshCloud = useCallback(async () => {
     await runCloudAction(async () => {
       await refreshCloudMaps();
@@ -123,9 +138,7 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
     });
   }, [applyResult, deps, runCloudAction, stateRef]);
 
-  const isOffline = useCallback(() => {
-    return typeof navigator.onLine === "boolean" && !navigator.onLine;
-  }, []);
+  const isOffline = useCallback(() => !isOnline, [isOnline]);
 
   const isCloudAvailable = useCallback(() => {
     const hasSession = Boolean(cloudSessionRef.current?.user?.email);

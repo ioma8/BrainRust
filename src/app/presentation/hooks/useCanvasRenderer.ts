@@ -8,6 +8,7 @@ import { iconMap } from "../constants/icons";
 import { EMOJI_FONT, NODE_FONT } from "../constants/typography";
 import { buildRenderPlan, type RenderEdge, type RenderNode } from "../rendering/renderPlan";
 import { drawBackgroundImage } from "../rendering/canvasCompositor";
+import { buildSelectedNodeOverlay } from "../rendering/selectionOverlay";
 const ICON_SPACING = 20;
 const TEXT_PADDING = 20;
 
@@ -21,6 +22,8 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
     offset: Point;
     width: number;
     height: number;
+    dpr: number;
+    themeKey: string;
   } | null>(null);
 
   const measureNodeWidth = useCallback((node: Node): number => {
@@ -180,7 +183,9 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
     map: MindMap,
     offset: Point,
     width: number,
-    height: number
+    height: number,
+    dpr: number,
+    themeKey: string
   ) => {
     const cache = backgroundCacheRef.current;
     if (!cache) return true;
@@ -189,7 +194,9 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
       cache.offset.x !== offset.x ||
       cache.offset.y !== offset.y ||
       cache.width !== width ||
-      cache.height !== height
+      cache.height !== height ||
+      cache.dpr !== dpr ||
+      cache.themeKey !== themeKey
     );
   }, []);
 
@@ -203,10 +210,22 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
       if (width <= 0 || height <= 0) return;
     }
     const colors = themeColorsRef.current;
+    const dpr = window.devicePixelRatio || 1;
+    const themeKey = [
+      colors.canvasBg,
+      colors.edge,
+      colors.node,
+      colors.nodeSelected,
+      colors.nodeBorder,
+      colors.nodeBorderSelected,
+      colors.nodeSelectedGlow,
+      colors.text,
+      colors.textSelected
+    ].join("|");
     const background = ensureBackgroundCanvas(width, height);
     if (!background) return;
 
-    if (shouldRebuildBackground(map, offset, width, height)) {
+    if (shouldRebuildBackground(map, offset, width, height, dpr, themeKey)) {
       const backgroundPlan = buildRenderPlan(
         map,
         offset,
@@ -221,19 +240,17 @@ export function useCanvasRenderer(themeColorsRef: { current: ThemeColors }) {
         nodesRef: map.nodes,
         offset: { ...offset },
         width,
-        height
+        height,
+        dpr,
+        themeKey
       };
     }
 
     drawBackgroundImage(ctx, background.canvas);
-    const overlayPlan = buildRenderPlan(
-      map,
-      offset,
-      { nodeHeight: NODE_HEIGHT, getNodeWidth },
-      map.selected_node_id
-    );
-    const selectedNodes = overlayPlan.nodes.filter((node) => node.isSelected);
-    drawNodes(selectedNodes, colors);
+    const selected = buildSelectedNodeOverlay(map, offset, { nodeHeight: NODE_HEIGHT, getNodeWidth });
+    if (selected) {
+      drawNodes([selected], colors);
+    }
   }, [
     drawEdges,
     drawNodes,

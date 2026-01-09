@@ -114,11 +114,17 @@ describe("useCloudState", () => {
 
     await flushPromises();
 
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+    });
     expect(hook.result.isCloudAvailable()).toBe(false);
 
     Object.defineProperty(window.navigator, "onLine", {
       configurable: true,
       get: () => true
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
     });
     expect(hook.result.isCloudAvailable()).toBe(true);
   });
