@@ -1,111 +1,63 @@
-# Frontend Analysis (TypeScript)
+# Frontend Overview (Preact + TypeScript)
 
-This document provides a comprehensive analysis of the BrainRust frontend codebase.
+This document describes the current BrainRust frontend implementation and where to make changes.
 
-## 1. High-Level Architecture
+## Quick Commands
 
-BrainRust employs a **Thick Client** architecture where the frontend is the source of truth for the active application state. It follows the principles of **Clean Architecture** (Hexagonal Architecture) to separate concerns.
+- Install deps: `npm install`
+- Run dev: `npm run dev`
+- Run unit tests (Vitest): `npm run test`
 
-- **Framework**: [Preact](https://preactjs.com/) (lightweight React alternative).
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) with [DaisyUI](https://daisyui.com/) and CSS variables for theming.
-- **Build Tool**: [Vite](https://vitejs.dev/).
-- **Language**: TypeScript.
+## Architecture Summary
 
-### Directory Structure
-The `src/app` directory is organized by architectural layers:
+BrainRust uses a **thick-client** frontend with Clean/Hex layering:
 
-| Layer | Path | Responsibilities |
-|-------|------|------------------|
-| **Presentation** | `src/app/presentation/` | UI components, hooks, themes, constants. |
-| **Application** | `src/app/application/` | Business logic (use cases), application state definitions, ports. |
-| **Domain** | `src/app/domain/` | Core business logic, data structures, layout algorithms. Pure TS, no side effects. |
-| **Infrastructure** | `src/app/infrastructure/` | Adapters for external systems (Tauri, Supabase). |
+- **Domain** (`src/app/domain/`): pure logic (mind map operations, layout, geometry).
+- **Application** (`src/app/application/`): use cases, app state, and ports (DI for testing).
+- **Presentation** (`src/app/presentation/`): Preact UI, hooks, theming, canvas rendering.
+- **Infrastructure** (`src/app/infrastructure/`): adapters for Tauri and Supabase.
 
-## 2. Core Logic & Domain (`src/app/domain`)
+The frontend owns active state (`AppState`/`TabState`). Rust is used for native features and local file format parsing/serialization.
 
-The domain layer is pure TypeScript and contains no UI-specific code.
+## State & Use Cases
 
-- **MindMap Model** (`mindmap.ts`):
-  - **Structure**: A flat normalized store (`Record<string, Node>`) with a `root_id`.
-  - **Immutability**: Operations like `addChild`, `removeNode`, and `changeNode` return a new `MindMap` object (copy-on-write), ensuring React/Preact reactivity works predictably.
-  - **Node**: Contains data (`content`, `icons`, timestamps) and structural links (`parent`, `children` IDs).
-- **Layout Engine** (`layout/`):
-  - **Algorithm**: A recursive tree layout algorithm (`layoutNode`, `layoutChildren`).
-  - **Responsibility**: Calculates `x`/`y` coordinates for all nodes based on their content size.
-  - **Separation**: Layout is computed separately from rendering. `computeLayout` takes a `MindMap` and returns a new one with updated coordinates.
+- App state: `src/app/application/state/tabState.ts`
+- Use cases: `src/app/application/usecases/*`
+- Use cases return `UsecaseResult` which may include `render` instructions for the canvas.
 
-## 3. Application Layer (`src/app/application`)
+There are small reducers/state-machines used to prevent UI races:
 
-This layer acts as the glue between the UI and the Domain.
+- Tab lifecycle guard: `src/app/application/state/tabLifecycle.ts`
+- Node editor state machine: `src/app/presentation/stateMachines/editorMachine.ts`
 
-- **Use Cases**: Implemented as standalone async functions (e.g., `addNode`, `saveMap`).
-  - They accept the current `AppState` and a set of `AppDependencies`.
-  - They return a `UsecaseResult` containing the new state and optional render instructions.
-- **State Management**:
-  - **Pattern**: Custom functional state updates.
-  - **State Object**: `AppState` holds a list of `TabState` and the `activeTabId`.
-  - **Dependency Injection**: Use cases receive dependencies (layout engine, file system ports) to allow for easier testing.
+## Rendering Pipeline
 
-## 4. Presentation Layer (`src/app/presentation`)
+Canvas rendering is immediate-mode but structured to be testable and performant:
 
-### Rendering Strategy (`useCanvasRenderer.ts`)
-BrainRust uses **Immediate Mode Rendering** on an HTML5 Canvas for performance.
-- **Canvas**: Drawn using the standard 2D Context API.
-- **Optimizations**: Handles `window.devicePixelRatio` for sharp text on high-DPI screens.
-- **Text Measurement**: Uses an off-screen or the main canvas context to measure text width for layout calculations.
-- **Hit Testing**: `getNodeAt` maps mouse coordinates to nodes for interaction.
+- Render plan builder (pure): `src/app/presentation/rendering/renderPlan.ts`
+  - Unit tests: `src/app/presentation/rendering/renderPlan.test.ts`
+- Canvas compositor helper (DPR-safe blitting): `src/app/presentation/rendering/canvasCompositor.ts`
+  - Unit tests: `src/app/presentation/rendering/canvasCompositor.test.ts`
+- Hook that owns the canvas context, measurement, and drawing:
+  - `src/app/presentation/hooks/useCanvasRenderer.ts`
 
-### Key Components
-- **`App.tsx`**: The **Composition Root**.
-  - Holds the main `useState` and `useRef` for the application.
-  - Wires up event listeners (keyboard, window resize, Tauri menu events).
-  - Dispatches actions to Use Cases.
-- **`CanvasView.tsx`**: A thin wrapper around the `<canvas>` element.
-- **`NodeEditor.tsx`**: An HTML `<input>` element that floats **over** the canvas at the absolute position of the selected node. This allows for native text editing capabilities (selection, copy/paste) without reimplementing a text editor inside Canvas.
+### Incremental redraw strategy
 
-## 5. Infrastructure & Backend Integration
+`useCanvasRenderer` maintains a cached offscreen “background” (edges + unselected nodes). On selection-only changes it redraws only a small overlay (selected node) on top.
 
-### Tauri Bridge (`src/app/infrastructure/tauri`)
-The frontend communicates with the Rust backend via `invoke` calls wrapped in adapters.
-- **Persistence**: `mapFileApi.ts` calls `load_map_file` and `save_map_file`.
-  - **Note**: The actual file parsing (JSON, XML, binary) happens in Rust, but the *active* object model lives in TypeScript.
-- **Dialogs**: Wrappers for native OS dialogs.
-- **Menus**: Listens for global menu events (e.g., "File > Save") emitted by the Rust backend.
+Important: When blitting the cached canvas onto the main canvas, the compositor resets transforms to avoid double-applying `devicePixelRatio`.
 
-### Cloud (`src/app/infrastructure/supabase`)
-- Implements `cloudApi.ts` for authentication and CRUD operations on MindMaps stored in Supabase.
+## UI Composition
 
-## 6. Discrepancies from Initial Assumptions
+- Composition root: `src/app/presentation/App.tsx`
+  - Wires dependencies, hooks, and dialogs.
+- Tabs: `src/app/presentation/components/TabBar.tsx`
+- Canvas view wrapper: `src/app/presentation/components/CanvasView.tsx`
+- Editor overlay: `src/app/presentation/components/NodeEditor.tsx`
+  - Enter/Escape are handled inside the input to prevent propagation to global shortcuts.
 
-- **Ownership**: The initial project description suggested the Rust backend "owns the map". The code analysis reveals that the **Frontend** owns the active map state. Rust is primarily used for:
-  1.  File System I/O and Format Conversion (parsing `.xmind`, `.mm`, etc. into the internal JSON structure).
-  2.  Native capabilities (Menu, Window).
-- **Logic**: Node manipulation logic (add, remove, sibling) is implemented in TypeScript (`src/app/domain/mindmap/mindmap.ts`), not Rust.
+## Styling & Theming
 
-## 7. Deep Analysis & Recommendations
-
-### Code Quality & Patterns
-- **God Component (`App.tsx`)**: This file is over 900 lines long and violates the Single Responsibility Principle. It manages state, effects, event listeners, and UI composition.
-  - *Recommendation*: Refactor into custom hooks (`useKeyboardShortcuts`, `useMenuHandler`, `useCloudSync`) to isolate logic.
-- **Manual Dependency Injection**: The `deps` object is recreated on every render in `App.tsx`.
-  - *Recommendation*: Use a Context API or a stable `const deps` reference to avoid unnecessary object creation.
-- **Render Loop**: `useCanvasRenderer` re-renders the entire tree on any state change.
-  - *Recommendation*: While Canvas is fast, this will become a bottleneck. No immediate action needed for < 500 nodes, but keep in mind.
-
-### Desktop UI/UX Gaps
-- **Missing Undo/Redo**: There is no Undo/Redo stack. This is a critical feature for a desktop editor.
-  - *Recommendation*: Implement a history stack in `AppState` (`past`, `future` arrays) to leverage the immutable data model.
-- **Zooming**: There is no support for zooming (Ctrl+Scroll).
-  - *Recommendation*: Add a `scale` property to `TabState` and apply `ctx.scale()` in the renderer.
-- **Context Menus**: Right-click interactions are missing.
-  - *Recommendation*: Add a native-feeling HTML context menu overlay.
-- **Performance (Culling)**: The renderer loops through all nodes even if they are off-screen.
-  - *Recommendation*: Implement simple viewport culling in `renderCanvas`.
-- **Hit Testing**: `getNodeAt` iterates linearly ($O(N)$).
-  - *Recommendation*: Reverse loop for z-order correctness (top items first) and consider spatial partitioning if N grows large.
-
-### Summary of Suggested Improvements
-1.  **Refactor `App.tsx`**: Extract logic into hooks.
-2.  **Implement Undo/Redo**: Add history management.
-3.  **Add Zoom Support**: enhance canvas renderer.
-4.  **Implement Viewport Culling**: Don't draw off-screen nodes.
+- Tailwind + DaisyUI: `src/index.css`
+- Fonts: `src/fonts.css` + bundled assets in `src/assets/fonts/`
+- Theme selection is persisted via localStorage and DaisyUI theme controller input.

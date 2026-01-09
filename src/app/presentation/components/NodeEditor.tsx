@@ -12,9 +12,10 @@ type NodeEditorProps = {
   isEditing: boolean;
   style: EditorStyle | null;
   onBlur: () => void;
+  onKeyDown: (event: KeyboardEvent) => void;
 };
 
-export function NodeEditor({ editorRef, isEditing, style, onBlur }: NodeEditorProps) {
+export function NodeEditor({ editorRef, isEditing, style, onBlur, onKeyDown }: NodeEditorProps) {
   return (
     <input
       ref={editorRef}
@@ -32,6 +33,7 @@ export function NodeEditor({ editorRef, isEditing, style, onBlur }: NodeEditorPr
         height: `${style.height}px`
       } : undefined}
       onBlur={onBlur}
+      onKeyDown={onKeyDown}
     />
   );
 }

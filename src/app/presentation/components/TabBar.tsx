@@ -12,7 +12,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }:
   return (
     <div
       id="tab-bar"
-      className="flex items-end bg-base-200 px-2"
+      className="flex shrink-0 items-end bg-base-200 px-2"
     >
       <div id="tabs" role="tablist" className="tabs tabs-lift flex-1 overflow-x-auto">
         {tabs.map((tab) => {

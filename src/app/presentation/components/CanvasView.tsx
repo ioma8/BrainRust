@@ -18,10 +18,10 @@ export function CanvasView({
   onDoubleClick
 }: CanvasViewProps) {
   return (
-    <div className="relative flex flex-1">
+    <div className="relative flex flex-1 min-h-0 overflow-hidden">
       <canvas
         ref={canvasRef}
-        className="h-full w-full bg-[var(--canvas-bg)]"
+        className="block h-full w-full bg-[var(--canvas-bg)]"
         tabIndex={0}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
