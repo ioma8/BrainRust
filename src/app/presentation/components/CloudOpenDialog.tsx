@@ -1,5 +1,5 @@
 import { useMemo } from "preact/hooks";
-import type { CloudMapSummary } from "../../infrastructure/supabase/cloudApi";
+import type { CloudMapSummary } from "../../application/ports/cloudPort";
 
 export type CloudSort = "date_desc" | "date_asc" | "name_asc" | "name_desc";
 

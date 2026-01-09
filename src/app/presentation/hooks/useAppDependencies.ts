@@ -4,6 +4,7 @@ import type { AppDependencies } from "../../application/usecases/types";
 import { dialog } from "../../infrastructure/tauri/dialogApi";
 import { appWindow } from "../../infrastructure/tauri/windowApi";
 import * as mapFileApi from "../../infrastructure/tauri/mapFileApi";
+import { createCloudPortAdapter } from "../../infrastructure/supabase/cloudPortAdapter";
 
 export function useAppDependencies(
   getLayoutConfig: () => LayoutConfig,
@@ -25,6 +26,7 @@ export function useAppDependencies(
       setTitle: (title: string) => appWindow.setTitle(title),
       close: () => appWindow.close(),
       destroy: () => appWindow.destroy()
-    }
+    },
+    cloud: createCloudPortAdapter()
   }), [getLayoutConfig, getViewportSize]);
 }

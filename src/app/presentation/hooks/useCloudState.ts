@@ -3,8 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import type { AppState } from "../../application/state/tabState";
 import type { AppDependencies } from "../../application/usecases/types";
 import type { UsecaseResult } from "../../application/usecases/result";
-import type { CloudMapSummary } from "../../infrastructure/supabase/cloudApi";
-import * as cloudApi from "../../infrastructure/supabase/cloudApi";
+import type { CloudMapSummary } from "../../application/ports/cloudPort";
 import { openCloudMap as openCloudMapUsecase } from "../../application/usecases/cloud";
 import type { CloudSort } from "../components/CloudOpenDialog";
 
@@ -52,21 +51,21 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
       setCloudMaps([]);
       return;
     }
-    const maps = await cloudApi.listMaps();
+    const maps = await deps.cloud.listMaps();
     setCloudMaps(maps);
-  }, []);
+  }, [deps.cloud]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     let isActive = true;
     void runCloudAction(async () => {
-      const session = await cloudApi.getSession();
+      const session = await deps.cloud.getSession();
       if (!isActive) return;
       setCloudSession(session);
       cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
-    const { data } = cloudApi.onAuthChange((session) => {
+    const { data } = deps.cloud.onAuthChange((session) => {
       void runCloudAction(async () => {
         setCloudSession(session);
         cloudSessionRef.current = session;
@@ -77,7 +76,7 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
       isActive = false;
       data.subscription.unsubscribe();
     };
-  }, [isSupabaseConfigured, refreshCloudMaps, runCloudAction]);
+  }, [isSupabaseConfigured, refreshCloudMaps, runCloudAction, deps.cloud]);
 
   useEffect(() => {
     const sync = () => {
@@ -99,34 +98,34 @@ export function useCloudState({ stateRef, deps, applyResult, isSupabaseConfigure
 
   const signInCloud = useCallback(async (email: string, password: string) => {
     await runCloudAction(async () => {
-      const session = await cloudApi.signIn(email, password);
+      const session = await deps.cloud.signIn(email, password);
       setCloudSession(session);
       cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
-  }, [refreshCloudMaps, runCloudAction]);
+  }, [refreshCloudMaps, runCloudAction, deps.cloud]);
 
   const signUpCloud = useCallback(async (email: string, password: string) => {
     await runCloudAction(async () => {
-      const session = await cloudApi.signUp(email, password);
+      const session = await deps.cloud.signUp(email, password);
       setCloudSession(session);
       cloudSessionRef.current = session;
       await refreshCloudMaps(session);
     });
-  }, [refreshCloudMaps, runCloudAction]);
+  }, [refreshCloudMaps, runCloudAction, deps.cloud]);
 
   const signOutCloud = useCallback(async () => {
     await runCloudAction(async () => {
-      await cloudApi.signOut();
+      await deps.cloud.signOut();
       setCloudSession(null);
       cloudSessionRef.current = null;
       setCloudMaps([]);
     });
-  }, [runCloudAction]);
+  }, [runCloudAction, deps.cloud]);
 
   const loadCloudMap = useCallback(async (mapId: string) => {
     await runCloudAction(async () => {
-      const detail = await cloudApi.loadMap(mapId);
+      const detail = await deps.cloud.loadMap(mapId);
       const result = await openCloudMapUsecase(
         stateRef.current,
         deps,

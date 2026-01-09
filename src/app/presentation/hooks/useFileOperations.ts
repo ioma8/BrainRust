@@ -6,7 +6,6 @@ import type { DialogFilter } from "../../application/ports/dialogPort";
 import { openFromDialog as openFromDialogUsecase, saveMap as saveMapUsecase } from "../../application/usecases/files";
 import { formatTitle } from "../../application/usecases/title";
 import { updateTab as updateTabState } from "../../application/state/tabState";
-import * as cloudApi from "../../infrastructure/supabase/cloudApi";
 
 type FileOpsDeps = {
   stateRef: { current: AppState };
@@ -105,11 +104,11 @@ export function useFileOperations({
     if (!tab.map || !session) return;
     const mapId = forceNew ? null : tab.cloudId;
     await runCloudAction(async () => {
-      const saved = await cloudApi.saveMap(mapId, title, tab.map!, session.user.id);
+      const saved = await deps.cloud.saveMap(mapId, title, tab.map!, session.user.id);
       await applyCloudSave(tab, title, saved.id);
       await refreshCloudMaps(session);
     });
-  }, [applyCloudSave, cloudSessionRef, refreshCloudMaps, runCloudAction]);
+  }, [applyCloudSave, cloudSessionRef, refreshCloudMaps, runCloudAction, deps.cloud]);
 
   const saveCloudMap = useCallback(async (tab: TabState, forceNew: boolean) => {
     await saveCloud(tab, tab.title, forceNew);

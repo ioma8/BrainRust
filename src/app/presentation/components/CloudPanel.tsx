@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { CloudMapSummary } from "../../infrastructure/supabase/cloudApi";
+import type { CloudMapSummary } from "../../application/ports/cloudPort";
 
 type CloudPanelProps = {
   isOpen: boolean;

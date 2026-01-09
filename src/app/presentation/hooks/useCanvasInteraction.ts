@@ -2,7 +2,7 @@ import { useCallback, useRef } from "preact/hooks";
 import type { AppState, TabState } from "../../application/state/tabState";
 import type { MindMap, Node } from "../../types";
 import type { Point } from "../../domain/layout/types";
-import { updateTab } from "../../application/state/tabState";
+import { setTabOffset } from "../../application/usecases/viewport";
 import { NODE_HEIGHT } from "../../domain/values/layout";
 
 type EditorPosition = {
@@ -77,7 +77,7 @@ export function useCanvasInteraction({
       x: dragState.lastOffset.x + dx,
       y: dragState.lastOffset.y + dy
     };
-    updateAppState((state) => updateTab(state, activeTab.id, { offset: nextOffset }));
+    updateAppState((state) => setTabOffset(state, activeTab.id, nextOffset));
     if (activeTab.map) {
       renderCanvas(activeTab.map, nextOffset);
     }

@@ -11,7 +11,7 @@ const mockSession = {
   user: { id: "user-1", email: "test@example.com" }
 };
 
-vi.mock("../../../infrastructure/supabase/cloudApi", () => ({
+const mockCloudPort = {
   getSession: vi.fn(async () => mockSession),
   onAuthChange: vi.fn(() => ({
     data: { subscription: { unsubscribe: vi.fn() } }
@@ -31,8 +31,13 @@ vi.mock("../../../infrastructure/supabase/cloudApi", () => ({
       selected_node_id: "root",
       nodes: {}
     }
+  })),
+  saveMap: vi.fn(async () => ({
+    id: "m1",
+    title: "Map",
+    updatedAt: "2024-01-01"
   }))
-}));
+};
 
 vi.mock("../../../application/usecases/cloud", () => ({
   openCloudMap: vi.fn(async (state) => ({ state }))
@@ -69,7 +74,8 @@ function makeDeps(): AppDependencies {
       setTitle: async () => undefined,
       close: async () => undefined,
       destroy: async () => undefined
-    }
+    },
+    cloud: mockCloudPort
   };
 }
 

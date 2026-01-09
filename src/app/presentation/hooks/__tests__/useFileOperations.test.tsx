@@ -8,7 +8,17 @@ import type { AppDependencies } from "../../../application/usecases/types";
 const openFromDialog = vi.fn();
 const saveMap = vi.fn();
 const formatTitle = vi.fn(() => "BrainRust");
-const saveCloudMap = vi.fn();
+
+const mockCloudPort = {
+  getSession: vi.fn(),
+  onAuthChange: vi.fn(),
+  signIn: vi.fn(),
+  signUp: vi.fn(),
+  signOut: vi.fn(),
+  listMaps: vi.fn(),
+  loadMap: vi.fn(),
+  saveMap: vi.fn()
+};
 
 vi.mock("../../../application/usecases/files", () => ({
   openFromDialog: (...args: unknown[]) => openFromDialog(...args),
@@ -17,10 +27,6 @@ vi.mock("../../../application/usecases/files", () => ({
 
 vi.mock("../../../application/usecases/title", () => ({
   formatTitle: (...args: unknown[]) => formatTitle(...args)
-}));
-
-vi.mock("../../../infrastructure/supabase/cloudApi", () => ({
-  saveMap: (...args: unknown[]) => saveCloudMap(...args)
 }));
 
 function makeDeps(): AppDependencies {
@@ -54,7 +60,8 @@ function makeDeps(): AppDependencies {
       setTitle: async () => undefined,
       close: async () => undefined,
       destroy: async () => undefined
-    }
+    },
+    cloud: mockCloudPort
   };
 }
 
@@ -173,7 +180,7 @@ test("saves existing cloud map and updates title", async () => {
   const updateAppState = vi.fn();
   const setTitle = vi.spyOn(deps.window, "setTitle");
 
-  saveCloudMap.mockResolvedValueOnce({ id: "cloud-1", title: "Untitled", updatedAt: "2024-01-01" });
+  mockCloudPort.saveMap.mockResolvedValueOnce({ id: "cloud-1", title: "Untitled", updatedAt: "2024-01-01" });
 
   const hook = renderHook(() =>
     useFileOperations({
@@ -196,7 +203,7 @@ test("saves existing cloud map and updates title", async () => {
   await hook.result.saveActiveTab(false);
   await flushPromises();
 
-  expect(saveCloudMap).toHaveBeenCalledWith("cloud-1", "Untitled", tab.map, "user-1");
+  expect(mockCloudPort.saveMap).toHaveBeenCalledWith("cloud-1", "Untitled", tab.map, "user-1");
   expect(updateAppState).toHaveBeenCalledTimes(1);
   expect(setTitle).toHaveBeenCalledWith("BrainRust");
 });
